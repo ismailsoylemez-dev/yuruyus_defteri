@@ -35,6 +35,7 @@ class PrefsKeys {
   static const notifyGoal = 'notify_goal';
   static const notifyEvening = 'notify_evening';
   static const notifyWeekly = 'notify_weekly';
+  static const notifyStandup = 'notify_standup';
   static const goalNotifiedOn = 'goal_notified_on';
   static const skipLogin = 'skip_login';
 
@@ -69,7 +70,7 @@ class PrefsKeys {
   /// Varsayilanlar da paylasilir; arka plan ile UI farkli deger kullanmamali.
   static const defaultGoal = 8000;
   static const defaultHeight = 172;
-  static const defaultWeight = 93.0;
+  static const defaultWeight = 70.0;
 }
 
 class PrefsService {
@@ -129,6 +130,9 @@ class PrefsService {
 
   bool get notifyWeekly => _p.getBool(PrefsKeys.notifyWeekly) ?? false;
   Future<void> setNotifyWeekly(bool v) => _p.setBool(PrefsKeys.notifyWeekly, v);
+
+  bool get notifyStandup => _p.getBool(PrefsKeys.notifyStandup) ?? true;
+  Future<void> setNotifyStandup(bool v) => _p.setBool(PrefsKeys.notifyStandup, v);
 
   String get goalNotifiedOn => _p.getString(PrefsKeys.goalNotifiedOn) ?? '';
   Future<void> setGoalNotifiedOn(String v) =>

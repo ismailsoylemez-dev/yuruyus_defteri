@@ -259,6 +259,8 @@ class WorkoutManager(
 
     private fun speak(text: String) {
         if (!ttsReady) return
+        val muted = StepService.prefs(ctx).getBoolean("voice_muted", false)
+        if (muted) return
         try {
             tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "yd_${SystemClock.elapsedRealtime()}")
         } catch (e: Exception) {

@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:adim_sayar/services/backup_service.dart';
-import 'package:adim_sayar/utils/achievements.dart';
-import 'package:adim_sayar/utils/aggregate.dart';
-import 'package:adim_sayar/utils/intensity.dart';
-import 'package:adim_sayar/utils/metrics.dart';
-import 'package:adim_sayar/widgets/activity_sheet.dart';
-import 'package:adim_sayar/widgets/hour_chart.dart';
-import 'package:adim_sayar/widgets/info_card.dart';
-import 'package:adim_sayar/widgets/week_rings.dart';
-import 'package:adim_sayar/widgets/period_chart.dart';
+import 'package:yuruyus_defteri/services/backup_service.dart';
+import 'package:yuruyus_defteri/utils/achievements.dart';
+import 'package:yuruyus_defteri/utils/aggregate.dart';
+import 'package:yuruyus_defteri/utils/intensity.dart';
+import 'package:yuruyus_defteri/utils/metrics.dart';
+import 'package:yuruyus_defteri/widgets/activity_sheet.dart';
+import 'package:yuruyus_defteri/widgets/hour_chart.dart';
+import 'package:yuruyus_defteri/widgets/info_card.dart';
+import 'package:yuruyus_defteri/widgets/week_rings.dart';
+import 'package:yuruyus_defteri/widgets/period_chart.dart';
 
 /// Veri dokumu, rozetler, tarih/yag yardimcilari ve grafik etiketleri.
 /// Calistirmak icin: flutter test test/features_test.dart

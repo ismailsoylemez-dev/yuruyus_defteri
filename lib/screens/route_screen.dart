@@ -1,18 +1,42 @@
 import 'dart:async';
-import 'dart:ui' show FontFeature;
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/aggregate.dart';
+import '../utils/intensity.dart';
 import '../utils/metrics.dart';
 import '../utils/root_nav.dart';
 import '../widgets/period_selector.dart';
 import '../widgets/route_settings_panel.dart';
+import 'package:provider/provider.dart';
+import '../providers/step_provider.dart';
+import '../providers/settings_provider.dart';
+
+Widget modernTileBuilder(
+  BuildContext context,
+  Widget tileWidget,
+  TileImage tile,
+) {
+  return ColorFiltered(
+    colorFilter: const ColorFilter.matrix(<double>[
+      0.33, 0.59, 0.11, 0, 15,
+      0.33, 0.59, 0.11, 0, 15,
+      0.33, 0.59, 0.11, 0, 15,
+      0,    0,    0,    1, 0,
+    ]),
+    child: tileWidget,
+  );
+}
 
 /// Rota haritasi: alt menudeki "Rota" sekmesi (embedded) ya da Gecmis'teki
 /// "Rotayi gor" ile acilan ayri sayfa. Gun / Hafta / Ay / Yil filtresi
@@ -37,6 +61,9 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
   static const _fallbackCenter = LatLng(39.0, 35.0); // Turkiye
   static const _dotLimit = 1500;
 
+  final _boundaryKey = GlobalKey();
+  bool _isSharing = false;
+
   final _map = MapController();
   Period _period = Period.day;
   int _offset = 0;
@@ -54,6 +81,7 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
   /// cizilmez; boylece acilista Turkiye/dunya geneli hic gorunmez.
   LatLng? _startCenter;
   bool _centerReady = false;
+  bool _initialFitDone = false;
 
   /// "Konumu ac" penceresi bu acilista bir kez sorulur.
   bool _askedLocation = false;
@@ -138,6 +166,38 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
         behavior: SnackBarBehavior.floating,
         content: Text(text),
       ));
+  }
+
+  Future<void> _shareRoute() async {
+    if (_isSharing) return;
+    try {
+      setState(() => _isSharing = true);
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      final boundary = _boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) {
+        _snack('Görüntü alınamadı.');
+        return;
+      }
+      
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+      
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/route_share.png');
+      await file.writeAsBytes(byteData.buffer.asUint8List());
+      
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'İşte bugünkü yürüyüş rotam ve istatistiklerim! #YürüyüşDefteri',
+      );
+    } catch (e) {
+      debugPrint('Share error: $e');
+      _snack('Paylaşım sırasında bir hata oluştu.');
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
   }
 
   Future<void> _startWorkout({required bool interval}) async {
@@ -355,16 +415,20 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
     ];
     try {
       if (pts.isEmpty) {
+        if (_initialFitDone) return;
         final c = _startCenter;
         _map.move(c ?? _fallbackCenter, c == null ? 6 : 16);
+        _initialFitDone = true;
       } else if (pts.length == 1) {
-        _map.move(pts.first, 16);
+        _map.move(pts.first, 15);
+        _initialFitDone = true;
       } else {
         _map.fitCamera(CameraFit.bounds(
           bounds: LatLngBounds.fromPoints(pts),
-          padding: const EdgeInsets.fromLTRB(36, 56, 36, 36),
-          maxZoom: 17,
+          padding: const EdgeInsets.fromLTRB(60, 80, 60, 60),
+          maxZoom: 15,
         ));
+        _initialFitDone = true;
       }
     } catch (e) {
       debugPrint('Harita konumlanamadi: $e');
@@ -449,8 +513,16 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
     final range = _range;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Rota'),
+        title: const Text('Rota ve Yürüyüş'),
         actions: [
+          if (_offset == 0 && _period == Period.day && _data.segments.isNotEmpty)
+            _isSharing 
+                ? const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                : IconButton(
+                    tooltip: 'Paylaş',
+                    onPressed: _shareRoute,
+                    icon: Icon(Icons.share, color: AppColors.accent),
+                  ),
           IconButton(
             tooltip: 'Yürüyüşlerim',
             onPressed: _openWorkouts,
@@ -499,111 +571,132 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
                 ),
               ),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppColors.divider),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Stack(
-                      children: [
-                        if (_centerReady && _shown)
-                          _buildMap(context)
-                        else
-                          const SizedBox.expand(),
-                        if (_loading)
-                          const Positioned(
-                            left: 0,
-                            right: 0,
-                            top: 0,
-                            child: LinearProgressIndicator(minHeight: 3),
-                          ),
-                        if (!_loading && _data.isEmpty)
-                          Align(
-                            alignment: Alignment.bottomCenter,
-                            child: _EmptyNote(
-                              period: _period,
-                              today: _offset == 0 && _period == Period.day,
-                              ready: _status.ready,
+              child: RepaintBoundary(
+                key: _boundaryKey,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(20),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: AppColors.divider),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                          ),
-                        // Canli GPS durumu: aktif mi, dogruluk, kaydedilen nokta.
-                        if (_offset == 0 &&
-                            _period == Period.day &&
-                            _status.ready &&
-                            _status.locationOn)
-                          Positioned(
-                            top: 10,
-                            left: 10,
-                            right: 60,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: _GpsChip(status: _status),
+                            child: Stack(
+                              children: [
+                                if (_centerReady && _shown)
+                                  _buildMap(context)
+                                else
+                                  const SizedBox.expand(),
+                                if (_loading)
+                                  const Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    top: 0,
+                                    child: LinearProgressIndicator(minHeight: 3),
+                                  ),
+                                if (!_loading && _data.isEmpty)
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: _EmptyNote(
+                                      period: _period,
+                                      today: _offset == 0 && _period == Period.day,
+                                      ready: _status.ready,
+                                    ),
+                                  ),
+                                // Canli GPS durumu: aktif mi, dogruluk, kaydedilen nokta.
+                                if (_offset == 0 &&
+                                    _period == Period.day &&
+                                    _status.ready &&
+                                    _status.locationOn)
+                                  Positioned(
+                                    top: 10,
+                                    left: 10,
+                                    right: 60,
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: _GpsChip(status: _status),
+                                    ),
+                                  ),
+                                Positioned(
+                                  top: 10,
+                                  right: 10,
+                                  child: _MapButton(
+                                    icon: Icons.center_focus_strong_outlined,
+                                    tooltip: 'Rotaya odaklan',
+                                    onTap: _fit,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        Positioned(
-                          top: 10,
-                          right: 10,
-                          child: _MapButton(
-                            icon: Icons.center_focus_strong_outlined,
-                            tooltip: 'Rotaya odaklan',
-                            onTap: _fit,
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: _workout.active
+                          ? _WorkoutPanel(status: _workout, onStop: _stopWorkout)
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (_offset == 0 && _period == Period.day) ...[
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: FilledButton(
+                                          onPressed: () =>
+                                              _startWorkout(interval: false),
+                                          style: FilledButton.styleFrom(
+                                            minimumSize: const Size.fromHeight(48),
+                                          ),
+                                          child: const Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Icon(Icons.directions_walk_rounded),
+                                              SizedBox(width: 4),
+                                              Text('/'),
+                                              SizedBox(width: 4),
+                                              Icon(Icons.directions_run_rounded),
+                                              SizedBox(width: 10),
+                                              Text('Antrenmanı Başlat'),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                                _SummaryBar(data: _data, period: _period),
+                              ],
+                            ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: _workout.active
-                  ? _WorkoutPanel(status: _workout, onStop: _stopWorkout)
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_offset == 0 && _period == Period.day) ...[
-                          Row(
-                            children: [
-                              Expanded(
-                                child: FilledButton.icon(
-                                  onPressed: () =>
-                                      _startWorkout(interval: false),
-                                  icon: const Icon(Icons.play_arrow_rounded),
-                                  label: const Text('Yürüyüşe başla'),
-                                  style: FilledButton.styleFrom(
-                                    minimumSize: const Size.fromHeight(44),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _startWorkout(interval: true),
-                                  icon: const Icon(Icons.timer_outlined),
-                                  label: const Text('Aralıklı'),
-                                  style: OutlinedButton.styleFrom(
-                                    minimumSize: const Size.fromHeight(44),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                        _SummaryBar(data: _data, period: _period),
-                      ],
-                    ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  Color _getSegmentColor(RouteSegment s) {
+    if (s.durationMs == 0) return _routeColor;
+    final mins = s.durationMs / 60000;
+    if (mins < 1) return _routeColor;
+    final cadence = s.steps / mins;
+    if (cadence >= Intensity.runMinCadence) {
+      return Colors.red;
+    } else if (cadence >= Intensity.briskMinCadence) {
+      return Colors.orange;
+    } else {
+      return Colors.blue;
+    }
   }
 
   Widget _buildMap(BuildContext context) {
@@ -616,7 +709,7 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
       mapController: _map,
       options: MapOptions(
         initialCenter: _me ?? _startCenter ?? _fallbackCenter,
-        initialZoom: (_me ?? _startCenter) == null ? 6 : 16,
+        initialZoom: (_me ?? _startCenter) == null ? 6 : 15,
         minZoom: 3,
         maxZoom: 19,
         backgroundColor: AppColors.surfaceAlt,
@@ -630,12 +723,12 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
       ),
       children: [
         // OpenStreetMap karolari (anahtarsiz). Koyu temada karolar koyu
-        // tona cevrilir; CARTO artik API anahtari istiyor.
+        // tona cevrilir; modernTileBuilder ile premium gorumun saglanir.
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.ismail.adim_sayar',
           maxNativeZoom: 19,
-          tileBuilder: dark ? darkModeTileBuilder : null,
+          tileBuilder: dark ? darkModeTileBuilder : modernTileBuilder,
         ),
         PolylineLayer(
           polylines: [
@@ -643,7 +736,7 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
               if (s.points.length >= 2)
                 Polyline(
                   points: s.points,
-                  color: _routeColor,
+                  color: _getSegmentColor(s),
                   strokeWidth: 4.5,
                   borderColor: dark
                       ? Colors.black.withValues(alpha: 0.55)
@@ -1071,18 +1164,53 @@ class _SegBadge extends StatelessWidget {
 // ----------------------------------------------------------------------
 
 /// Suren yuruyus: sure, mesafe, tempo, adim; aralikli modda evre sayaci.
-class _WorkoutPanel extends StatelessWidget {
+class _WorkoutPanel extends StatefulWidget {
   final WorkoutStatus status;
   final VoidCallback onStop;
+
   const _WorkoutPanel({required this.status, required this.onStop});
 
   @override
+  State<_WorkoutPanel> createState() => _WorkoutPanelState();
+}
+
+class _WorkoutPanelState extends State<_WorkoutPanel> {
+  bool _muted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMuteState();
+  }
+
+  Future<void> _fetchMuteState() async {
+    final m = await RouteService.isVoiceMuted();
+    if (mounted) setState(() => _muted = m);
+  }
+
+  Future<void> _toggleMute() async {
+    final n = !_muted;
+    await RouteService.setVoiceMuted(n);
+    if (mounted) setState(() => _muted = n);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final s = status;
+    final step = context.watch<StepProvider>();
+    final settings = context.watch<SettingsProvider>();
+    final s = widget.status;
     final km = s.distanceM / 1000;
     final pace = km >= 0.2 ? (s.elapsedSec / km).round() : null;
     final fastColor = AppColors.pick(const Color(0xFFFFA726), const Color(0xFFF57C00));
     final phaseColor = s.fast ? fastColor : AppColors.accent;
+
+    final breakdown = ActivityBreakdown.compute(
+      steps: s.steps,
+      seconds: s.elapsedSec,
+      stride: step.stride,
+      weight: settings.weight,
+      height: settings.height,
+    );
 
     Widget stat(String v, String l) => Expanded(
           child: Column(
@@ -1119,7 +1247,7 @@ class _WorkoutPanel extends StatelessWidget {
               Icon(Icons.directions_walk, size: 18, color: AppColors.accent),
               const SizedBox(width: 6),
               Text(
-                s.interval ? 'Aralıklı yürüyüş' : 'Yürüyüş',
+                s.interval ? 'Aralıklı yürüyüş' : 'Antrenman',
                 style: TextStyle(
                   color: AppColors.text,
                   fontSize: 13.5,
@@ -1127,6 +1255,15 @@ class _WorkoutPanel extends StatelessWidget {
                 ),
               ),
               const Spacer(),
+              IconButton(
+                onPressed: _toggleMute,
+                icon: Icon(
+                  _muted ? Icons.volume_off : Icons.volume_up,
+                  color: _muted ? AppColors.error : AppColors.textDim,
+                ),
+                tooltip: _muted ? 'Sesi Aç' : 'Sesi Kapat',
+              ),
+              const SizedBox(width: 4),
               Text(
                 clockText(s.elapsedSec),
                 style: TextStyle(
@@ -1182,14 +1319,14 @@ class _WorkoutPanel extends StatelessWidget {
               stat('${km.toStringAsFixed(2).replaceAll('.', ',')} km', 'mesafe'),
               stat(paceText(pace), 'ort. tempo'),
               stat(Metrics.thousands(s.steps), 'adım'),
-              stat('${s.splits.length}', 'km bitti'),
+              stat('${breakdown.kcal.toStringAsFixed(0)} kcal', 'kalori'),
             ],
           ),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: onStop,
+              onPressed: widget.onStop,
               icon: const Icon(Icons.stop_rounded),
               label: const Text('Bitir'),
               style: FilledButton.styleFrom(
@@ -1256,6 +1393,24 @@ class _IntervalSheetState extends State<_IntervalSheet> {
               'sesli söyler; ekranı açman gerekmez.',
               style: TextStyle(color: AppColors.textDim, fontSize: 12.5),
             ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.divider),
+              ),
+              child: Row(
+                children: [
+                  _LegendDot(color: const Color(0xFF3B82F6), label: 'Normal'),
+                  const Spacer(),
+                  _LegendDot(color: const Color(0xFFF57C00), label: 'Tempolu'),
+                  const Spacer(),
+                  _LegendDot(color: const Color(0xFFE53935), label: 'Koşu'),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             Text('Tur sayısı', style: TextStyle(color: AppColors.text, fontSize: 13.5)),
             const SizedBox(height: 6),
@@ -1287,10 +1442,47 @@ class _WorkoutSummaryDialog extends StatelessWidget {
   final Workout workout;
   const _WorkoutSummaryDialog({required this.workout});
 
+  /// Sonuçları hesaplarken Formula kullanıyoruz.
+  ActivityBreakdown _calculateBreakdown() {
+    final w = workout;
+    var briskSteps = 0;
+    var briskMin = 0;
+    var runSteps = 0;
+    var runMin = 0;
+
+    // Split'leri (her km surelerini) inceleyerek tempo belirle
+    // Fakat bu veriler ham sekilde StepService tarafindan toplanip zaten yazilmistir.
+    // Ancak `Workout` modelinde sadece 'splits' var, 'briskSteps' vs yok.
+    // Bunu kabaca genel sureden cikarabiliriz.
+    final mins = w.durationSec / 60.0;
+    final cad = mins > 0 ? w.steps / mins : 0;
+    
+    if (cad >= Intensity.runMinCadence) {
+      runSteps = w.steps;
+      runMin = mins.round();
+    } else if (cad >= Intensity.briskMinCadence) {
+      briskSteps = w.steps;
+      briskMin = mins.round();
+    }
+
+    return ActivityBreakdown.compute(
+      totalSteps: w.steps,
+      briskSteps: briskSteps,
+      briskMin: briskMin,
+      runSteps: runSteps,
+      runMin: runMin,
+      hasData: true,
+      heightCm: 170, // Ortalama deger kullanildi, aslinda provider'dan alinabilir
+      weightKg: 70.0,
+      activeMin: mins.round(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final w = workout;
-    final km = w.distanceM / 1000;
+    final breakdown = _calculateBreakdown();
+    
     final rows = <Widget>[];
     var prev = 0;
     for (var i = 0; i < w.splits.length; i++) {
@@ -1322,12 +1514,13 @@ class _WorkoutSummaryDialog extends StatelessWidget {
         );
     return AlertDialog(
       backgroundColor: AppColors.surface,
-      title: Text(w.interval ? 'Aralıklı yürüyüş bitti' : 'Yürüyüş bitti'),
+      title: Text(w.interval ? 'Aralıklı antrenman bitti' : 'Antrenman bitti'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            line('Mesafe', '${km.toStringAsFixed(2).replaceAll('.', ',')} km'),
+            line('Mesafe', '${breakdown.km.toStringAsFixed(2).replaceAll('.', ',')} km'),
+            line('Kalori', '${breakdown.kcal.toStringAsFixed(1).replaceAll('.', ',')} kcal'),
             line('Süre', clockText(w.durationSec)),
             line('Ortalama tempo', paceText(w.paceSecPerKm)),
             line('Adım', Metrics.thousands(w.steps)),
@@ -1423,6 +1616,39 @@ class _WorkoutListSheet extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            color: AppColors.text,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

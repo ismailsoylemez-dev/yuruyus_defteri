@@ -185,6 +185,22 @@ class RouteService {
     }
   }
 
+  static Future<bool> isVoiceMuted() async {
+    if (!supported) return false;
+    try {
+      return await _channel.invokeMethod<bool>('isVoiceMuted') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> setVoiceMuted(bool muted) async {
+    if (!supported) return;
+    try {
+      await _channel.invokeMethod<bool>('setVoiceMuted', {'muted': muted});
+    } catch (_) {}
+  }
+
   /// Izin ayar ekranindan donuldugunde servis tipini tazeler.
   static Future<void> refresh() async {
     if (!supported) return;

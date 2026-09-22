@@ -1,4 +1,4 @@
-name: adim_sayar
+name: yuruyus_defteri
 description: Reklamsiz kisisel adim sayar uygulamasi.
 publish_to: 'none'
 version: 1.0.0+1
@@ -27,6 +27,9 @@ dependencies:
   # Rota haritasi (OpenStreetMap/CARTO karolari, API anahtari gerekmez)
   flutter_map: ^8.2.0
   latlong2: ^0.9.1
+  package_info_plus: ^10.2.1
+  share_plus: ^13.3.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
@@ -44,7 +47,3 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
 
-  # Ayarlar > Hakkinda bolumundeki gelistirici gorseli.
-  # 320x320 kirpilmis; 44-56 px kutuda 3x ekranlarda bile net gorunur.
-  assets:
-    - assets/about_ismail.jpg

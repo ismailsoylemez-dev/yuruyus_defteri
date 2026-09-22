@@ -137,7 +137,7 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
           NavigationDestination(
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
-            label: 'Rota',
+            label: 'Rota ve Yürüyüş',
           ),
         ],
       ),

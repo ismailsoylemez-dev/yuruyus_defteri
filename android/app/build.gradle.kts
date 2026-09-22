@@ -36,16 +36,7 @@ android {
         }
     }
 
-    applicationVariants.all {
-        val variant = this
-        variant.outputs.forEach { output ->
-            if (output is com.android.build.gradle.internal.api.BaseVariantOutputImpl) {
-                val versionName = flutter.versionName
-                val buildType = variant.buildType.name
-                output.outputFileName = "adim_sayar-$buildType-v$versionName.apk"
-            }
-        }
-    }
+
 }
 
 kotlin {

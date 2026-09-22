@@ -70,7 +70,9 @@ class StepService : Service(), SensorEventListener {
         const val ACTION_MIDNIGHT = "com.ismail.adim_sayar.MIDNIGHT"
         const val ACTION_EVENING = "com.ismail.adim_sayar.EVENING"
         const val ACTION_WEEKLY = "com.ismail.adim_sayar.WEEKLY"
+        const val ACTION_STANDUP = "com.ismail.adim_sayar.STANDUP"
         private const val WEEKLY_NOTIF_ID = 1003
+        private const val STANDUP_NOTIF_ID = 1004
 
         /** Flutter tarafinin SharedPreferences dosyasindaki bool (flutter. onekli). */
         fun flutterBool(c: Context, key: String, def: Boolean): Boolean =
@@ -174,6 +176,7 @@ class StepService : Service(), SensorEventListener {
     private var lastNotify = 0L
     private var lastPersist = 0L
     private var lastWidget = 0L
+    private var lastStepTimeMs = 0L
 
     /** Bellekte olup henuz diske yazilmamis degisiklik var mi. */
     private var dirty = false
@@ -205,6 +208,7 @@ class StepService : Service(), SensorEventListener {
         closeMinuteIfEnded()
         persist(force = true)
         if (widgetDirty) maybeRenderWidget(force = true)
+        scheduleStandup()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -274,6 +278,10 @@ class StepService : Service(), SensorEventListener {
             onWeekly()
             return START_STICKY
         }
+        if (intent?.action == ACTION_STANDUP) {
+            onStandup()
+            return START_STICKY
+        }
         if (intent != null) {
             applyProfile(
                 intent.getIntExtra("goal", -1),
@@ -327,6 +335,7 @@ class StepService : Service(), SensorEventListener {
         putHistory(date, todaySteps)
         dirty = true
         widgetDirty = true
+        lastStepTimeMs = System.currentTimeMillis()
 
         // Taban/gun degisimi hemen, olagan artislar en fazla 30 sn'de bir diske.
         persist(force = reset)
@@ -354,6 +363,7 @@ class StepService : Service(), SensorEventListener {
             (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.cancel(midnightIntent())
             (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.cancel(eveningIntent())
             (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.cancel(weeklyIntent())
+            (getSystemService(Context.ALARM_SERVICE) as? AlarmManager)?.cancel(standupIntent())
         } catch (e: Exception) {
         }
         running = false
@@ -835,6 +845,91 @@ class StepService : Service(), SensorEventListener {
         } catch (e: Exception) {
         }
         scheduleEvening()
+    }
+
+    // ------------------------------------------------------------------
+    // Hareketsizlik uyarisi (2 saatte bir)
+    // ------------------------------------------------------------------
+
+    private fun standupIntent(): PendingIntent =
+        PendingIntent.getService(
+            this,
+            5,
+            Intent(this, StepService::class.java).setAction(ACTION_STANDUP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+    private fun scheduleStandup() {
+        val am = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val triggerAt = System.currentTimeMillis() + 2 * 3600_000L
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, standupIntent())
+            } else {
+                am.set(AlarmManager.RTC_WAKEUP, triggerAt, standupIntent())
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun onStandup() {
+        try {
+            // Eger kullanici aslinda yuruduyse ama idleTick calismadiysa
+            // (araliksiz yurumusse), otele. 1.5 saat icinde adim atildiysa yoksay.
+            if (System.currentTimeMillis() - lastStepTimeMs < 5400_000L) {
+                scheduleStandup()
+                return
+            }
+            
+            val flutter = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val on = flutter.getBoolean("flutter.notify_standup", true)
+            val c = Calendar.getInstance()
+            val hour = c.get(Calendar.HOUR_OF_DAY)
+            
+            // 09:00 - 20:00 (19:59 dahil) ve bugun hic adim atilmamissa rahatsiz etme.
+            if (!on || hour < 9 || hour >= 20 || todaySteps == 0) return
+            
+            val allowed = Build.VERSION.SDK_INT < 33 ||
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            val nm = notificationManager()
+            if (allowed && nm != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    nm.getNotificationChannel(REMINDER_CHANNEL_ID) == null
+                ) {
+                    nm.createNotificationChannel(
+                        NotificationChannel(
+                            REMINDER_CHANNEL_ID,
+                            "Hatirlatmalar",
+                            NotificationManager.IMPORTANCE_DEFAULT
+                        ).apply { description = "Hedef ve yurume hatirlatmalari" }
+                    )
+                }
+                val open = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                val pending = open?.let {
+                    PendingIntent.getActivity(
+                        this, 6, it,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                }
+                val n = NotificationCompat.Builder(this, REMINDER_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.ic_menu_directions)
+                    .setContentTitle("Harekete geçme zamanı!")
+                    .setContentText("Çok oturdun, kalkıp bir su içmeye ve bacaklarını esnetmeye ne dersin?")
+                    .setStyle(
+                        NotificationCompat.BigTextStyle()
+                            .bigText("Çok oturdun, kalkıp bir su içmeye ve bacaklarını esnetmeye ne dersin?")
+                    )
+                    .setAutoCancel(true)
+                    .setContentIntent(pending)
+                    .build()
+                nm.notify(STANDUP_NOTIF_ID, n)
+            }
+        } catch (e: Exception) {
+        }
+        // Kendini tekrar kurma; yalnizca yeni bir adim sonrasinda (idleTick) tekrar kurulur.
     }
 
     // ------------------------------------------------------------------

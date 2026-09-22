@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:adim_sayar/utils/intensity.dart';
-import 'package:adim_sayar/utils/metrics.dart';
+import 'package:yuruyus_defteri/utils/intensity.dart';
+import 'package:yuruyus_defteri/utils/metrics.dart';
 
 /// Formul referans degerleri. Ayni sayilar native tarafta
 /// android/app/src/main/kotlin/com/ismail/adim_sayar/Formulas.kt ile de

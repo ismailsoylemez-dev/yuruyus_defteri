@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:adim_sayar/services/route_service.dart';
-import 'package:adim_sayar/utils/intensity.dart';
-import 'package:adim_sayar/utils/metrics.dart';
-import 'package:adim_sayar/widgets/week_rings.dart';
+import 'package:yuruyus_defteri/services/route_service.dart';
+import 'package:yuruyus_defteri/utils/intensity.dart';
+import 'package:yuruyus_defteri/utils/metrics.dart';
+import 'package:yuruyus_defteri/widgets/week_rings.dart';
 
 /// Yuruyus kaydi bicimleri, GPS adim boyu ve su gizleme.
 void main() {

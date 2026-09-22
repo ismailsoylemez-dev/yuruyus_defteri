@@ -142,6 +142,7 @@ class SettingsProvider extends ChangeNotifier {
   bool get notifyGoal => _prefs.notifyGoal;
   bool get notifyEvening => _prefs.notifyEvening;
   bool get notifyWeekly => _prefs.notifyWeekly;
+  bool get notifyStandup => _prefs.notifyStandup;
 
   Future<void> setNotifyGoal(bool v) async {
     await _prefs.setNotifyGoal(v);
@@ -155,6 +156,11 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> setNotifyWeekly(bool v) async {
     await _prefs.setNotifyWeekly(v);
+    notifyListeners();
+  }
+
+  Future<void> setNotifyStandup(bool v) async {
+    await _prefs.setNotifyStandup(v);
     notifyListeners();
   }
 

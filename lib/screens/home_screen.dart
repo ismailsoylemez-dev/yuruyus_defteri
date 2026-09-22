@@ -84,11 +84,17 @@ class HomeScreen extends StatelessWidget {
           GestureDetector(
             onTap: RootNav.focusGoal,
             child: StatTile(
-              icon: remaining == 0 ? Icons.check_circle_outline : Icons.flag_outlined,
-              value: remaining == 0 ? 'Hedef tuttu' : '%${settings.goal <= 0 ? 0 : ((steps / settings.goal) * 100).round()}',
-              label: remaining == 0
-                  ? '${Metrics.thousands(steps - settings.goal)} adım fazlasıyla'
-                  : 'Hedefe ${Metrics.thousands(remaining)} adım kaldı',
+              icon: settings.goal <= 0
+                  ? Icons.flag_outlined
+                  : (remaining == 0 ? Icons.check_circle_outline : Icons.flag_outlined),
+              value: settings.goal <= 0
+                  ? 'Hedef yok'
+                  : (remaining == 0 ? 'Hedef tuttu' : '%${((steps / settings.goal) * 100).round()}'),
+              label: settings.goal <= 0
+                  ? '${Metrics.thousands(steps)} adım atıldı'
+                  : (remaining == 0
+                      ? '${Metrics.thousands(steps - settings.goal)} adım fazlasıyla'
+                      : 'Hedefe ${Metrics.thousands(remaining)} adım kaldı'),
             ),
           ),
           const SizedBox(height: 24),
@@ -540,10 +546,12 @@ void _showStreak(BuildContext context, StepProvider step, int goal) {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Text(
-                hit
-                    ? 'Bugün hedefi tuttun, serin güvende. 🔥'
-                    : 'Bugün ${Metrics.thousands((goal - today).clamp(0, goal))} '
-                        'adım daha atarsan seri ${current + 1} güne çıkar.',
+                goal <= 0
+                    ? 'Günlük hedefin kapalı. Seri takibi için bir hedef belirle.'
+                    : (hit
+                        ? 'Bugün hedefi tuttun, serin güvende. 🔥'
+                        : 'Bugün ${Metrics.thousands((goal - today).clamp(0, goal))} '
+                            'adım daha atarsan seri ${current + 1} güne çıkar.'),
                 style: TextStyle(color: AppColors.text, fontSize: 13),
               ),
             ),
@@ -559,8 +567,8 @@ void _showStreak(BuildContext context, StepProvider step, int goal) {
   );
 }
 
-/// Adim halkasi + dokununca halkanin altinda acilan gun detayi.
-class _RingWithDetail extends StatefulWidget {
+/// Adim halkasi + Su butonu.
+class _RingWithDetail extends StatelessWidget {
   final int steps;
   final int goal;
   final ActivityBreakdown breakdown;
@@ -576,74 +584,17 @@ class _RingWithDetail extends StatefulWidget {
   });
 
   @override
-  State<_RingWithDetail> createState() => _RingWithDetailState();
-}
-
-class _RingWithDetailState extends State<_RingWithDetail> {
-  bool _open = false;
-
-  @override
   Widget build(BuildContext context) {
-    final b = widget.breakdown;
-    final percent =
-        widget.goal <= 0 ? 0 : (widget.steps * 100 / widget.goal).round();
-    return Column(
-      children: [
-        // Halka ortada; "Su" butonu halkanin sag ust kosesindeki bos alanda.
-        SizedBox(
-          width: double.infinity,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              GestureDetector(
-                onTap: () => setState(() => _open = !_open),
-                child: StepRing(steps: widget.steps, goal: widget.goal),
-              ),
-              if (widget.waterMl != null)
-                const Positioned(top: 0, right: 0, child: _WaterButton()),
-            ],
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOut,
-          child: !_open
-              ? const SizedBox(width: double.infinity)
-              : Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceAlt,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: AppColors.accent.withValues(alpha: 0.5)),
-                    ),
-                    child: Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 12,
-                      runSpacing: 6,
-                      children: [
-                        _Pill(Icons.flag_outlined, AppColors.accent,
-                            '%$percent'),
-                        _Pill(Icons.straighten, MetricColors.km,
-                            '${b.km.toStringAsFixed(2).replaceAll('.', ',')} km'),
-                        _Pill(Icons.local_fire_department_outlined,
-                            MetricColors.kcal, '${b.kcal.round()} kcal'),
-                        _Pill(Icons.timer_outlined, MetricColors.time,
-                            Metrics.duration(b.minutes)),
-                        if (widget.waterMl != null)
-                          _Pill(
-                              Icons.water_drop_outlined,
-                              MetricColors.water,
-                              '${(widget.waterMl! / 1000).toStringAsFixed(1).replaceAll('.', ',')} L'),
-                      ],
-                    ),
-                  ),
-                ),
-        ),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          StepRing(steps: steps, goal: goal),
+          if (waterMl != null)
+            const Positioned(top: 0, right: 0, child: _WaterButton()),
+        ],
+      ),
     );
   }
 }
@@ -879,24 +830,39 @@ class _SensorBanner extends StatelessWidget {
   }
 }
 
-class _LatestBadgeCard extends StatelessWidget {
+class _LatestBadgeCard extends StatefulWidget {
   const _LatestBadgeCard();
+
+  @override
+  State<_LatestBadgeCard> createState() => _LatestBadgeCardState();
+}
+
+class _LatestBadgeCardState extends State<_LatestBadgeCard> {
+  AchievementStats? _stats;
+  int _lastUpdateSteps = -1;
 
   @override
   Widget build(BuildContext context) {
     final step = context.watch<StepProvider>();
     final settings = context.watch<SettingsProvider>();
-    final all = step.breakdownAllTime;
 
     if (step.history.isEmpty) return const SizedBox.shrink();
 
-    final stats = AchievementStats.from(
-      history: step.history,
-      goal: settings.goal,
-      heightCm: settings.heightCm,
-      totalKcal: all.kcal,
-      totalKm: all.km,
-    );
+    final currentSteps = step.todaySteps;
+    // Performans için her adımda değil, 50 adımda bir veya gün değiştiğinde hesapla
+    if (_stats == null || (currentSteps - _lastUpdateSteps).abs() >= 50 || currentSteps < _lastUpdateSteps) {
+      final all = step.breakdownAllTime;
+      _stats = AchievementStats.from(
+        history: step.history,
+        goal: settings.goal,
+        heightCm: settings.heightCm,
+        totalKcal: all.kcal,
+        totalKm: all.km,
+      );
+      _lastUpdateSteps = currentSteps;
+    }
+
+    final stats = _stats!;
 
     final unlocked = Achievements.evaluate(stats).where((p) => p.unlocked).toList();
     if (unlocked.isEmpty) return const SizedBox.shrink();

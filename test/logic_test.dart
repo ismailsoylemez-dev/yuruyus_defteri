@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:adim_sayar/providers/step_provider.dart';
-import 'package:adim_sayar/services/prefs_service.dart';
-import 'package:adim_sayar/utils/aggregate.dart';
-import 'package:adim_sayar/utils/metrics.dart';
+import 'package:yuruyus_defteri/providers/step_provider.dart';
+import 'package:yuruyus_defteri/services/prefs_service.dart';
+import 'package:yuruyus_defteri/utils/aggregate.dart';
+import 'package:yuruyus_defteri/utils/metrics.dart';
 
 /// Duzeltilen mantik hatalarinin geri gelmemesi icin regresyon testleri.
 /// Calistirmak icin: flutter test test/logic_test.dart

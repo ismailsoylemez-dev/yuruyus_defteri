@@ -15,6 +15,7 @@ import '../widgets/backup_section.dart';
 import '../widgets/route_settings_panel.dart';
 import '../widgets/stride_calibration_tile.dart';
 import 'weight_screen.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class SettingsScreen extends StatelessWidget {
   /// true ise acilista "Gunluk hedef" bolumune kayar ve vurgular.
@@ -85,7 +86,7 @@ class SettingsScreen extends StatelessWidget {
           const _GroupLabel('VÜCUT'),
           _Section(
             title: 'Vücut bilgileri',
-            subtitle: 'Mesafe ve kalori hesabi için kullanilir.',
+            subtitle: 'Mesafe ve kalori hesabı için kullanılır.',
             child: Column(
               children: [
                 _NumberField(
@@ -250,6 +251,16 @@ class SettingsScreen extends StatelessWidget {
                     await settings.setNotifyWeekly(v);
                   },
                 ),
+                const Divider(height: 22),
+                _SwitchRow(
+                  label: 'Hareketsizlik uyarısı',
+                  sub: '09:00 - 20:00 arası 2 saat hareketsiz kalınca',
+                  value: settings.notifyStandup,
+                  onChanged: (v) async {
+                    if (v) await NotificationService.requestPermission();
+                    await settings.setNotifyStandup(v);
+                  },
+                ),
               ],
             ),
           ),
@@ -404,53 +415,59 @@ class SettingsScreen extends StatelessWidget {
             title: 'Hakkında',
             child: Column(
               children: [
-                Row(
-                  children: [
-                    const _DeveloperAvatar(size: 44, radius: 13),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Geliştirici',
-                            style: TextStyle(
-                              color: AppColors.textDim,
-                              fontSize: 11.5,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'İSMAİL SÖYLEMEZ',
-                            style: TextStyle(
-                              color: AppColors.text,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Geliştirici',
+                        style: TextStyle(
+                          color: AppColors.textDim,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Text(
+                        'İSMAİL SÖYLEMEZ',
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const Divider(height: 24),
-                Row(
-                  children: [
-                    Text(
-                      'Sürüm',
-                      style: TextStyle(color: AppColors.textDim, fontSize: 13),
-                    ),
-                    const Spacer(),
-                    Text(
-                      'v1.0.0',
-                      style: TextStyle(
-                        color: AppColors.text.withValues(alpha: 0.9),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 16),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) {
+                    final versionText = snapshot.hasData ? 'v${snapshot.data!.version}' : '...';
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Sürüm',
+                          style: TextStyle(color: AppColors.textDim, fontSize: 13),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          versionText,
+                          style: TextStyle(
+                            color: AppColors.text.withValues(alpha: 0.9),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),

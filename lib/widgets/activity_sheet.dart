@@ -29,7 +29,7 @@ Future<void> showActivitySheet(
     barrierDismissible: true,
     barrierLabel: 'Kapat',
     barrierColor: Colors.black.withValues(alpha: AppColors.isLight ? 0.18 : 0.38),
-    transitionDuration: const Duration(milliseconds: 240),
+    transitionDuration: const Duration(milliseconds: 340),
     pageBuilder: (ctx, _, __) => _ActivityCard(
       title: title,
       breakdown: breakdown,
@@ -38,7 +38,7 @@ Future<void> showActivitySheet(
     transitionBuilder: (ctx, anim, _, child) {
       final curved = CurvedAnimation(
         parent: anim,
-        curve: Curves.easeOutCubic,
+        curve: Curves.easeOutBack,
         reverseCurve: Curves.easeInCubic,
       );
       final blur = 5.0 * anim.value;
@@ -86,7 +86,7 @@ class _ActivityCard extends StatelessWidget {
               child: GestureDetector(
                 onTap: () {},
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: 440, maxHeight: maxH),
+                  constraints: BoxConstraints(maxWidth: 340, maxHeight: maxH),
                   child: Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(

@@ -33,13 +33,24 @@ class PeriodSelector extends StatelessWidget {
                   ),
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  p.label,
-                  style: TextStyle(
-                    color: active ? AppColors.onAccent : AppColors.textDim,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _icon(p),
+                      size: 14,
+                      color: active ? AppColors.onAccent : AppColors.textDim,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      p.label,
+                      style: TextStyle(
+                        color: active ? AppColors.onAccent : AppColors.textDim,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -47,6 +58,19 @@ class PeriodSelector extends StatelessWidget {
         );
       }).toList(),
     );
+  }
+
+  IconData _icon(Period p) {
+    switch (p) {
+      case Period.day:
+        return Icons.today;
+      case Period.week:
+        return Icons.date_range;
+      case Period.month:
+        return Icons.calendar_month;
+      case Period.year:
+        return Icons.event_note;
+    }
   }
 }
 

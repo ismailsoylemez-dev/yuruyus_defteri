@@ -51,7 +51,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   /// Tempo kartindaki "Rotayi gor": o gunun haritasi.
-  void _openRoute(DateTime day) {
+  void _openRoute(DateTime day) async {
+    final pts = await RouteService.load(day);
+    if (!mounted) return;
+    if (pts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('Bugüne ait rota kaydı bulunamadı.'),
+      ));
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => RouteScreen(initialDate: day)),
     );
@@ -413,8 +422,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       const SizedBox(height: 10),
       StatTile(
         icon: Icons.flag_outlined,
-        value: '$goalDays / $spanDays gün',
-        label: 'Hedefe ulaşılan gün ($days gün kayıt var)',
+        value: '$goalDays / $days gün',
+        label: 'Hedefe ulaşılan gün (Toplam kayıtlı gün)',
       ),
     ];
   }

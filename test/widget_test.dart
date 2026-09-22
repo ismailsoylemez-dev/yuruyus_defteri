@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:adim_sayar/utils/metrics.dart';
+import 'package:yuruyus_defteri/utils/metrics.dart';
 
 void main() {
   test('adim -> mesafe ve kalori hesabi', () {

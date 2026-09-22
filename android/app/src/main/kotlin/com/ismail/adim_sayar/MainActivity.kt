@@ -302,6 +302,18 @@ class MainActivity : FlutterActivity() {
                     result.success(WorkoutManager.readAll(this).toString())
                 }
 
+                "isVoiceMuted" -> {
+                    val muted = StepService.prefs(this).getBoolean("voice_muted", false)
+                    result.success(muted)
+                }
+
+                "setVoiceMuted" -> {
+                    val m = args as? Map<*, *>
+                    val muted = m?.get("muted") as? Boolean ?: false
+                    StepService.prefs(this).edit().putBoolean("voice_muted", muted).apply()
+                    result.success(true)
+                }
+
                 // GPS ile olculen adim boyu (m); <= 0 ise boydan tahmine donulur.
                 "setStride" -> {
                     val m = args as? Map<*, *>
