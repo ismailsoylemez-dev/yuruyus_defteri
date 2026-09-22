@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Widget: solda uygulamanin cizdigi gorsel (adim halkasi, hafta, km/kcal/su/sure),
+  sagda ince "su ekle" seridi. Su takibi kapaliysa serit GONE olur ve gorsel
+  tum alani kaplar (StepWidgetProvider.update).
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal">
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <TextView
+                android:id="@+id/widget_placeholder"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:padding="8dp"
+                android:textColor="#8A93A6"
+                android:textSize="13sp"
+                android:text="Uygulamayı bir kez açın" />
+
+            <ImageView
+                android:id="@+id/widget_image"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:adjustViewBounds="true"
+                android:scaleType="fitCenter"
+                android:contentDescription="@string/app_name" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/widget_water_add"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/widget_water_button"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:text="💧\n+"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:contentDescription="250 ml su ekle" />
+    </LinearLayout>
+</FrameLayout>
