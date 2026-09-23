@@ -736,7 +736,45 @@ class _PeriodChartState extends State<PeriodChart> {
   /// Sutunun tum yuksekligi dokunulabilir (kisa sutunlar da).
   Widget _tap(SeriesPoint p, Widget child, int index) {
     final cb = widget.onBarTap;
-    if (cb == null && !_hasTip) return child;
+    
+    String tooltipMsg = '';
+    if (widget.heightCm != null && widget.weightKg != null && p.start != null) {
+      final h = widget.heightCm!;
+      final w = widget.weightKg!;
+      final bd = widget.breakdown?.call(p.start!, p.end ?? p.start!);
+      final km = bd?.km ?? Metrics.distanceKm(p.value, h);
+      final kcal = bd?.kcal.round() ?? Metrics.kcal(p.value, h, w).round();
+      final dateLabel = p.start == p.end
+          ? '${Metrics.numericDate(p.start!)} ${Metrics.longLabel(p.start!)}'
+          : p.label;
+      tooltipMsg = '$dateLabel\n${Metrics.thousands(p.value)} adım\n${_km(km)} km\n${Metrics.compact(kcal)} kcal';
+    }
+
+    Widget wrapped = tooltipMsg.isNotEmpty
+        ? Tooltip(
+            message: tooltipMsg,
+            triggerMode: TooltipTriggerMode.tap,
+            showDuration: const Duration(seconds: 3),
+            preferBelow: false,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt.withValues(alpha: 0.95),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.divider),
+              boxShadow: AppColors.cardShadow,
+            ),
+            textStyle: const TextStyle(
+              color: AppColors.text,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+            textAlign: TextAlign.center,
+            child: child,
+          )
+        : child;
+
+    if (cb == null && !_hasTip) return wrapped;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
@@ -745,7 +783,7 @@ class _PeriodChartState extends State<PeriodChart> {
         }
         cb?.call(p);
       },
-      child: child,
+      child: wrapped,
     );
   }
 

@@ -65,6 +65,13 @@ class WorkoutManager(
     private var phaseEndsAt = 0L
     private var intervalDone = false
 
+    private var briskSteps = 0
+    private var briskMin = 0
+    private var runSteps = 0
+    private var runMin = 0
+    private var lastMinuteSec = 0L
+    private var lastMinuteSteps = -1
+
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private val handler = Handler(Looper.getMainLooper())
@@ -73,6 +80,22 @@ class WorkoutManager(
         override fun run() {
             if (!active) return
             if (interval && !intervalDone) checkPhase()
+            
+            val currentSteps = stepsNow()
+            val sec = elapsedSec()
+            if (sec - lastMinuteSec >= 60) {
+                val deltaSteps = currentSteps - lastMinuteSteps
+                if (deltaSteps >= Formulas.RUN_MIN_CADENCE) {
+                    runSteps += deltaSteps
+                    runMin += 1
+                } else if (deltaSteps >= Formulas.BRISK_MIN_CADENCE) {
+                    briskSteps += deltaSteps
+                    briskMin += 1
+                }
+                lastMinuteSec = sec
+                lastMinuteSteps = currentSteps
+            }
+            
             onChanged()
             handler.postDelayed(this, 5_000L)
         }
@@ -94,6 +117,12 @@ class WorkoutManager(
         fastPhase = true
         intervalDone = false
         phaseEndsAt = startElapsed + fastSec * 1000L
+        briskSteps = 0
+        briskMin = 0
+        runSteps = 0
+        runMin = 0
+        lastMinuteSec = 0L
+        lastMinuteSteps = startSteps
         initTts()
         vibrate(longArrayOf(0, 250))
         handler.removeCallbacks(tick)
@@ -154,6 +183,10 @@ class WorkoutManager(
         o.put("distanceM", distanceM)
         val now = stepsNow()
         o.put("steps", if (startSteps >= 0 && now >= startSteps) now - startSteps else 0)
+        o.put("briskSteps", briskSteps)
+        o.put("briskMin", briskMin)
+        o.put("runSteps", runSteps)
+        o.put("runMin", runMin)
         o.put("splits", JSONArray(splits))
         o.put("interval", interval)
         if (interval) {
@@ -208,6 +241,10 @@ class WorkoutManager(
         o.put("distanceM", distanceM)
         val now = stepsNow()
         o.put("steps", if (startSteps >= 0 && now >= startSteps) now - startSteps else 0)
+        o.put("briskSteps", briskSteps)
+        o.put("briskMin", briskMin)
+        o.put("runSteps", runSteps)
+        o.put("runMin", runMin)
         o.put("splits", JSONArray(splits))
         o.put("interval", interval)
         if (interval) {

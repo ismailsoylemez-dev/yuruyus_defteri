@@ -327,7 +327,10 @@ class RouteTracker(
             if (dtMs < 0) return
             val dist = prev.distanceTo(loc)
             if (dist < MIN_MOVE_M) return
-            if (dtMs in 1L..59_999L && dist / (dtMs / 1000f) > MAX_SPEED_MPS) return
+            if (dtMs > 0 && dist / (dtMs / 1000f) > MAX_SPEED_MPS) {
+                rejectedToday++
+                return
+            }
             if (newSegment || dtMs > SEGMENT_GAP_MS) {
                 segment++
             } else {

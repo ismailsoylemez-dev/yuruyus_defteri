@@ -182,101 +182,96 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 : null,
           ),
           const SizedBox(height: 16),
-          // Sira: donem ozeti (adim/km/kcal/sure/su) -> hemen altinda grafik.
-          _SectionCaption(switch (_period) {
-            Period.day => 'Gün özeti',
-            Period.week => 'Hafta özeti',
-            Period.month => 'Ay özeti',
-            Period.year => 'Yıl özeti',
-          }),
-          const SizedBox(height: 8),
-          SummaryRow(
-            steps: total,
-            km: bd.km,
-            kcal: bd.kcal,
-            minutes: bd.minutes,
-            waterMl: settings.waterEnabled
-                ? Aggregate.totalBetween(water.history, range.start, range.end)
-                : null,
-          ),
-          const SizedBox(height: 12),
-          PeriodChart(
-            series: series,
-            goal: goal,
-            showGoalLine: _period != Period.year,
-            caption: _chartCaption(),
-            heightCm: h,
-            weightKg: w,
-            activeMinutes: (from, to) =>
-                step.activeMinutesBetween(from, to),
-            breakdown: step.breakdownBetween,
-            waterOf: settings.waterEnabled
-                ? (a, b) => Aggregate.totalBetween(water.history, a, b)
-                : null,
-            // Hafta / Ay / Yil: grafigi kaydirarak onceki doneme gecilir.
-            onSwipePrev: _period == Period.day ? null : _swipePrev,
-            onSwipeNext:
-                _period == Period.day || _offset >= 0 ? null : _swipeNext,
-            // Hedef her derlemede guncel ayardan okunur: hedef degisince
-            // rozetler aninda guncellenir.
-            goalDaysOf: _period == Period.day || _period == Period.week
-                ? (a, b) => _goalDays(step.history, a, b, goal)
-                : null,
-            onBarTap: (p) {
-              final s = p.start;
-              final e = p.end;
-              if (s == null || e == null) return;
-              if (p.value <= 0) {
-                _noData(s == e ? 'Bu gün' : 'Bu ay');
-                return;
-              }
-              if (s == e) {
-                // Gun sekmesinde baska gune dokunuldu: sayfa o gune gecer.
-                if (_period == Period.day) {
-                  _goToDay(s);
-                } else {
-                  setState(() => _selectedDate = s);
-                }
-              }
-
-              showActivitySheet(
-                context,
-                title: s == e
-                    ? '${Metrics.numericDate(s)} ${Metrics.longLabel(s)}'
-                    : '${Metrics.monthName(s.month)} ${s.year}',
-                breakdown: step.breakdownBetween(s, e),
-                onShowRoute: s == e ? () => _openRoute(s) : null,
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          // Yil isi haritasi yalniz Yil sekmesinde.
-          if (_period == Period.year) ...[
-            YearHeatmap(
-              year: range.start.year,
-              history: step.history,
+          if (total == 0)
+            _buildEmptyState()
+          else ...[
+            // Sira: donem ozeti (adim/km/kcal/sure/su) -> hemen altinda grafik.
+            _SectionCaption(switch (_period) {
+              Period.day => 'Gün özeti',
+              Period.week => 'Hafta özeti',
+              Period.month => 'Ay özeti',
+              Period.year => 'Yıl özeti',
+            }),
+            const SizedBox(height: 8),
+            SummaryRow(
+              steps: total,
+              km: bd.km,
+              kcal: bd.kcal,
+              minutes: bd.minutes,
+              waterMl: settings.waterEnabled
+                  ? Aggregate.totalBetween(water.history, range.start, range.end)
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            PeriodChart(
+              series: series,
               goal: goal,
+              showGoalLine: _period != Period.year,
+              caption: _chartCaption(),
+              heightCm: h,
+              weightKg: w,
+              activeMinutes: (from, to) =>
+                  step.activeMinutesBetween(from, to),
+              breakdown: step.breakdownBetween,
+              waterOf: settings.waterEnabled
+                  ? (a, b) => Aggregate.totalBetween(water.history, a, b)
+                  : null,
+              // Hafta / Ay / Yil: grafigi kaydirarak onceki doneme gecilir.
+              onSwipePrev: _period == Period.day ? null : _swipePrev,
+              onSwipeNext:
+                  _period == Period.day || _offset >= 0 ? null : _swipeNext,
+              // Hedef her derlemede guncel ayardan okunur: hedef degisince
+              // rozetler aninda guncellenir.
+              goalDaysOf: _period == Period.day || _period == Period.week
+                  ? (a, b) => _goalDays(step.history, a, b, goal)
+                  : null,
+              onBarTap: (p) {
+                final s = p.start;
+                final e = p.end;
+                if (s == null || e == null) return;
+                if (p.value <= 0) {
+                  _noData(s == e ? 'Bu gün' : 'Bu ay');
+                  return;
+                }
+                if (s == e) {
+                  // Gun sekmesinde baska gune dokunuldu: sayfa o gune gecer.
+                  if (_period == Period.day) {
+                    _goToDay(s);
+                  } else {
+                    setState(() => _selectedDate = s);
+                  }
+                }
+              },
             ),
             const SizedBox(height: 16),
-          ],
-          _TempoCard(breakdown: bd),
-          const SizedBox(height: 20),
-          // Ortalama / en iyi gun / hedef gunleri: yalniz Hafta, Ay, Yil.
-          if (_period != Period.day) ...[
-            ..._periodStats(step.history, goal, range, total, bd),
-            const SizedBox(height: 24),
-          ],
-          // Saatlik grafik yalniz Gun sekmesinde (hafta/ay/yilda anlamsiz);
-          // ok tuslari ve tarih seciciyle herhangi bir gune gidilir.
-          if (_period == Period.day) ...[
-            _HourChartCard(
-              step: step,
-              targetDate: _selectedDate ?? range.end,
-              // Saatlik kartta secilen gun tum sayfaya uygulanir: Gun
-              // sekmesi o gune gecer (ozet, grafik, kirilim ve dokum ayni gun).
-              onDateChanged: _goToDay,
-            ),
-            const SizedBox(height: 24),
+            // Yil isi haritasi yalniz Yil sekmesinde.
+            if (_period == Period.year) ...[
+              YearHeatmap(
+                year: range.start.year,
+                history: step.history,
+                goal: goal,
+              ),
+              const SizedBox(height: 16),
+            ],
+            _TempoCard(breakdown: bd),
+            const SizedBox(height: 20),
+            // Ortalama / en iyi gun / hedef gunleri: yalniz Hafta, Ay, Yil.
+            if (_period != Period.day) ...[
+              ..._periodStats(step.history, goal, range, total, bd),
+              const SizedBox(height: 24),
+            ],
+            // Saatlik grafik yalniz Gun sekmesinde (hafta/ay/yilda anlamsiz);
+            // ok tuslari ve tarih seciciyle herhangi bir gune gidilir.
+            if (_period == Period.day) ...[
+              _HourChartCard(
+                step: step,
+                targetDate: _selectedDate ?? range.end,
+                // Saatlik kartta secilen gun tum sayfaya uygulanir: Gun
+                // sekmesi o gune gecer (ozet, grafik, kirilim ve dokum ayni gun).
+                onDateChanged: _goToDay,
+              ),
+              const SizedBox(height: 24),
+            ],
           ],
           Row(
             children: [
@@ -297,6 +292,52 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
           const SizedBox(height: 12),
           ..._buildBreakdown(step, settings, range),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.divider),
+        boxShadow: AppColors.cardShadow,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.auto_graph_outlined,
+                size: 48, color: AppColors.primary),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'Kayıt Bulunamadı',
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Seçtiğiniz zaman aralığında herhangi bir\nadım kaydı bulunmuyor.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textDim,
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
         ],
       ),
     );

@@ -30,6 +30,7 @@ dependencies:
   package_info_plus: ^10.2.1
   share_plus: ^13.3.0
   path_provider: ^2.1.6
+  confetti: ^0.8.0
 
 dev_dependencies:
   flutter_test:

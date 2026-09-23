@@ -1,5 +1,7 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:confetti/confetti.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/settings_provider.dart';
@@ -19,8 +21,29 @@ import '../utils/root_nav.dart';
 import 'water_screen.dart';
 import 'weight_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late ConfettiController _confettiController;
+  int _lastSteps = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _confettiController =
+        ConfettiController(duration: const Duration(seconds: 2));
+  }
+
+  @override
+  void dispose() {
+    _confettiController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +57,18 @@ class HomeScreen extends StatelessWidget {
 
     final remaining = (settings.goal - steps).clamp(0, settings.goal);
 
-    return Scaffold(
+    // Hedef gecildiyse ve daha once gecilmemisse confetti firlat
+    if (_lastSteps != -1 &&
+        settings.goal > 0 &&
+        steps >= settings.goal &&
+        _lastSteps < settings.goal) {
+      _confettiController.play();
+    }
+    _lastSteps = steps;
+
+    return Stack(
+      children: [
+        Scaffold(
       appBar: AppBar(
         title: const Text('Bugün'),
         actions: [
@@ -133,6 +167,20 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
+    ),
+    Align(
+      alignment: Alignment.topCenter,
+      child: ConfettiWidget(
+        confettiController: _confettiController,
+        blastDirection: pi / 2, // asagi dogru
+        maxBlastForce: 25,
+        minBlastForce: 10,
+        emissionFrequency: 0.05,
+        numberOfParticles: 25,
+        gravity: 0.2,
+      ),
+    ),
+    ],
     );
   }
 }

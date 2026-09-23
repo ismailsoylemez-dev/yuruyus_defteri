@@ -423,11 +423,18 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
         _map.move(pts.first, 15);
         _initialFitDone = true;
       } else {
-        _map.fitCamera(CameraFit.bounds(
-          bounds: LatLngBounds.fromPoints(pts),
-          padding: const EdgeInsets.fromLTRB(60, 80, 60, 60),
-          maxZoom: 15,
-        ));
+        final bounds = LatLngBounds.fromPoints(pts);
+        if ((bounds.north - bounds.south).abs() > 2.0 || 
+            (bounds.east - bounds.west).abs() > 2.0) {
+          // Asiri buyuk kutu (eski GPS sicramasi vb), sadece son noktaya odaklan.
+          _map.move(pts.last, 13);
+        } else {
+          _map.fitCamera(CameraFit.bounds(
+            bounds: bounds,
+            padding: const EdgeInsets.fromLTRB(60, 80, 60, 60),
+            maxZoom: 15,
+          ));
+        }
         _initialFitDone = true;
       }
     } catch (e) {
@@ -506,6 +513,17 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
     }
     await RouteService.setEnabled(true);
     await _refreshStatus();
+  }
+
+  void _goToMe() {
+    if (_me != null) {
+      _map.move(_me!, 16);
+    } else {
+      // Fallback
+      if (_data.allPoints.isNotEmpty) {
+        _map.move(_data.allPoints.last, 16);
+      }
+    }
   }
 
   @override
@@ -630,6 +648,15 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
                                     onTap: _fit,
                                   ),
                                 ),
+                                Positioned(
+                                  top: 60,
+                                  right: 10,
+                                  child: _MapButton(
+                                    icon: Icons.my_location,
+                                    tooltip: 'Beni bul',
+                                    onTap: _goToMe,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -705,7 +732,9 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
     final all = _data.allPoints;
     final showDots = _period == Period.day && all.length <= _dotLimit;
 
-    return FlutterMap(
+    return Stack(
+      children: [
+        FlutterMap(
       mapController: _map,
       options: MapOptions(
         initialCenter: _me ?? _startCenter ?? _fallbackCenter,
@@ -807,6 +836,57 @@ class _RouteScreenState extends State<RouteScreen> with WidgetsBindingObserver {
           ],
         ),
       ],
+    ),
+    if (!_loading && all.isEmpty) _buildEmptyState(),
+    ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Positioned.fill(
+      child: Container(
+        color: AppColors.surfaceAlt.withValues(alpha: 0.8),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    shape: BoxShape.circle,
+                    boxShadow: AppColors.cardShadow,
+                  ),
+                  child: const Icon(Icons.explore_outlined,
+                      size: 48, color: AppColors.primary),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Kayıtlı Rota Bulunamadı',
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Seçili zaman aralığı için henüz harita\nüzerinde bir izin tespit edilemedi.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.textDim,
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1458,23 +1538,16 @@ class _WorkoutSummaryDialog extends StatelessWidget {
     final cad = mins > 0 ? w.steps / mins : 0;
     
     if (cad >= Intensity.runMinCadence) {
-      runSteps = w.steps;
-      runMin = mins.round();
-    } else if (cad >= Intensity.briskMinCadence) {
-      briskSteps = w.steps;
-      briskMin = mins.round();
-    }
-
     return ActivityBreakdown.compute(
       totalSteps: w.steps,
-      briskSteps: briskSteps,
-      briskMin: briskMin,
-      runSteps: runSteps,
-      runMin: runMin,
+      briskSteps: w.briskSteps,
+      briskMin: w.briskMin,
+      runSteps: w.runSteps,
+      runMin: w.runMin,
       hasData: true,
       heightCm: 170, // Ortalama deger kullanildi, aslinda provider'dan alinabilir
       weightKg: 70.0,
-      activeMin: mins.round(),
+      activeMin: (w.durationSec / 60.0).round(),
     );
   }
 

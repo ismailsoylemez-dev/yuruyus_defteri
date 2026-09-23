@@ -697,6 +697,10 @@ class WorkoutStatus {
   final int elapsedSec;
   final double distanceM;
   final int steps;
+  final int briskSteps;
+  final int briskMin;
+  final int runSteps;
+  final int runMin;
   final List<int> splits;
   final bool interval;
   final int round;
@@ -711,6 +715,10 @@ class WorkoutStatus {
     this.elapsedSec = 0,
     this.distanceM = 0,
     this.steps = 0,
+    this.briskSteps = 0,
+    this.briskMin = 0,
+    this.runSteps = 0,
+    this.runMin = 0,
     this.splits = const [],
     this.interval = false,
     this.round = 0,
@@ -726,6 +734,10 @@ class WorkoutStatus {
         elapsedSec: (m['elapsedSec'] as num?)?.toInt() ?? 0,
         distanceM: (m['distanceM'] as num?)?.toDouble() ?? 0,
         steps: (m['steps'] as num?)?.toInt() ?? 0,
+        briskSteps: (m['briskSteps'] as num?)?.toInt() ?? 0,
+        briskMin: (m['briskMin'] as num?)?.toInt() ?? 0,
+        runSteps: (m['runSteps'] as num?)?.toInt() ?? 0,
+        runMin: (m['runMin'] as num?)?.toInt() ?? 0,
         splits: [
           for (final e in (m['splits'] as List? ?? const []))
             if (e is num) e.toInt(),
@@ -746,6 +758,10 @@ class Workout {
   final int durationSec;
   final double distanceM;
   final int steps;
+  final int briskSteps;
+  final int briskMin;
+  final int runSteps;
+  final int runMin;
   final List<int> splits;
   final bool interval;
   final int rounds;
@@ -757,6 +773,10 @@ class Workout {
     required this.durationSec,
     required this.distanceM,
     required this.steps,
+    this.briskSteps = 0,
+    this.briskMin = 0,
+    this.runSteps = 0,
+    this.runMin = 0,
     required this.splits,
     required this.interval,
     required this.rounds,
@@ -769,6 +789,10 @@ class Workout {
         durationSec: (m['durationSec'] as num?)?.toInt() ?? 0,
         distanceM: (m['distanceM'] as num?)?.toDouble() ?? 0,
         steps: (m['steps'] as num?)?.toInt() ?? 0,
+        briskSteps: (m['briskSteps'] as num?)?.toInt() ?? 0,
+        briskMin: (m['briskMin'] as num?)?.toInt() ?? 0,
+        runSteps: (m['runSteps'] as num?)?.toInt() ?? 0,
+        runMin: (m['runMin'] as num?)?.toInt() ?? 0,
         splits: [
           for (final e in (m['splits'] as List? ?? const []))
             if (e is num) e.toInt(),
