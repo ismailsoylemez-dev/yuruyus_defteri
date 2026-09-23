@@ -147,6 +147,16 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
           ],
         ),
         const SizedBox(height: 10),
+        Text(
+          'Bu ayar açıkken arka planda yürüyüşünüz haritaya kaydedilir. Kapalıysa harita kaydı tamamen durur (adım sayar çalışmaya devam eder) ve haritada yalnızca geçmiş yürüyüşleriniz görünür.',
+          style: TextStyle(
+            color: AppColors.textDim,
+            fontSize: 12.5,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         _StatusLine(
           ok: s.fine,
           text: s.fine ? 'Konum izni verildi' : 'Konum izni yok',

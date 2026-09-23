@@ -87,7 +87,6 @@ class _PeriodChartState extends State<PeriodChart> {
   static const _minValueSlot = 52.0;
   static const _chartHeight = 130.0;
   static const _lineHeight = 15.5;
-  static const _tipHeight = 24.0;
 
   final _scroll = ScrollController();
   int? _selected;
@@ -429,25 +428,7 @@ class _PeriodChartState extends State<PeriodChart> {
 
     return Column(
       children: [
-        if (_hasTip)
-          SizedBox(
-            height: _tipHeight,
-            child: sel == null
-                ? null
-                : Align(
-                    alignment: Alignment(
-                      series.length == 1
-                          ? 0
-                          : -1 + 2 * sel / (series.length - 1),
-                      0,
-                    ),
-                    child: _TipBubble(
-                      icon: widget.tipIcon,
-                      color: widget.barColor ?? AppColors.accent,
-                      text: widget.tipLabel!(series[sel]),
-                    ),
-                  ),
-          ),
+
         if (_showValues)
           SizedBox(
             height: _lines * _lineHeight + 2,
@@ -738,7 +719,7 @@ class _PeriodChartState extends State<PeriodChart> {
     final cb = widget.onBarTap;
     
     String tooltipMsg = '';
-    if (widget.heightCm != null && widget.weightKg != null && p.start != null) {
+    if (cb == null && widget.heightCm != null && widget.weightKg != null && p.start != null) {
       final h = widget.heightCm!;
       final w = widget.weightKg!;
       final bd = widget.breakdown?.call(p.start!, p.end ?? p.start!);
@@ -763,7 +744,7 @@ class _PeriodChartState extends State<PeriodChart> {
               border: Border.all(color: AppColors.divider),
               boxShadow: AppColors.cardShadow,
             ),
-            textStyle: const TextStyle(
+            textStyle: TextStyle(
               color: AppColors.text,
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -802,49 +783,6 @@ class _PeriodChartState extends State<PeriodChart> {
           height: 1.3,
         ),
       );
-}
-
-/// Grafigin icinde, dokunulan sutunun ustunde cikan bilgi kutusu.
-class _TipBubble extends StatelessWidget {
-  final IconData? icon;
-  final Color color;
-  final String text;
-
-  const _TipBubble({
-    required this.icon,
-    required this.color,
-    required this.text,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: color.withValues(alpha: 0.8)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 13, color: color),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            text,
-            maxLines: 1,
-            style: TextStyle(
-              color: AppColors.text,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _Legend extends StatelessWidget {

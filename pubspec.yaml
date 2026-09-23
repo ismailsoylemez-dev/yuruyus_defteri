@@ -31,7 +31,12 @@ dependencies:
   share_plus: ^13.3.0
   path_provider: ^2.1.6
   confetti: ^0.8.0
-
+  lottie: ^3.6.1
+  shimmer: ^4.0.0
+  percent_indicator: ^4.2.5
+  screenshot: ^3.0.0
+  geolocator: ^14.0.3
+  http: ^1.6.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,8 +1,10 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:confetti/confetti.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../providers/settings_provider.dart';
 import '../providers/step_provider.dart';
@@ -11,12 +13,12 @@ import '../theme/app_theme.dart';
 import '../utils/intensity.dart';
 import '../utils/metrics.dart';
 import '../widgets/activity_sheet.dart';
-import '../widgets/info_card.dart';
-import '../widgets/step_ring.dart';
+import '../widgets/fitness_rings.dart';
 import '../widgets/week_rings.dart';
 import '../widgets/water_quick.dart';
 import '../utils/achievements.dart';
 import '../widgets/achievement_section.dart';
+import '../widgets/weather_suggestion_card.dart';
 import '../utils/root_nav.dart';
 import 'water_screen.dart';
 import 'weight_screen.dart';
@@ -31,6 +33,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late ConfettiController _confettiController;
   int _lastSteps = -1;
+  String? _lastBadgeId;
 
   @override
   void initState() {
@@ -54,17 +57,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final steps = step.todaySteps;
     // Su takibi kapaliysa su ile ilgili her sey gizlenir (null = gosterme).
     final waterOn = settings.waterEnabled;
-
-    final remaining = (settings.goal - steps).clamp(0, settings.goal);
+    final effectiveGoal = step.effectiveGoal > 0 ? step.effectiveGoal : settings.goal;
 
     // Hedef gecildiyse ve daha once gecilmemisse confetti firlat
     if (_lastSteps != -1 &&
-        settings.goal > 0 &&
-        steps >= settings.goal &&
-        _lastSteps < settings.goal) {
+        effectiveGoal > 0 &&
+        steps >= effectiveGoal &&
+        _lastSteps < effectiveGoal) {
       _confettiController.play();
     }
     _lastSteps = steps;
+
+    if (_lastBadgeId != null && step.lastBadgeId != _lastBadgeId && step.lastBadgeId.isNotEmpty) {
+      _confettiController.play();
+    }
+    _lastBadgeId = step.lastBadgeId;
 
     return Stack(
       children: [
@@ -83,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Center(
             child: _StreakChip(
               days: step.currentStreak,
-              onTap: () => _showStreak(context, step, settings.goal),
+              onTap: () => _showStreak(context, step, step.effectiveGoal),
             ),
           ),
           // Ayarlar alt menude degil, burada (en sagda).
@@ -102,11 +109,14 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           if (step.state == SensorState.denied) const _PermissionBanner(),
           if (step.state == SensorState.unavailable) const _SensorBanner(),
+          const _BatteryBanner(),
+          const SizedBox(height: 8),
+          const WeatherSuggestionCard(),
           const SizedBox(height: 8),
           // Halkaya dokununca grafigin icinde gunun detayi acilir/kapanir.
           _RingWithDetail(
             steps: steps,
-            goal: settings.goal,
+            goal: step.effectiveGoal,
             breakdown: step.breakdownForDay(DateTime.now()),
             waterMl: waterOn ? waterProvider.todayWater : null,
           ),
@@ -114,27 +124,9 @@ class _HomeScreenState extends State<HomeScreen> {
           // Yuruyor / Duruyor halkanin hemen altinda.
           Center(child: _StatusChip(text: step.walkStatus)),
           const SizedBox(height: 14),
-          // Dokununca Ayarlar > Gunluk hedef bolumune gider.
-          GestureDetector(
-            onTap: RootNav.focusGoal,
-            child: StatTile(
-              icon: settings.goal <= 0
-                  ? Icons.flag_outlined
-                  : (remaining == 0 ? Icons.check_circle_outline : Icons.flag_outlined),
-              value: settings.goal <= 0
-                  ? 'Hedef yok'
-                  : (remaining == 0 ? 'Hedef tuttu' : '%${((steps / settings.goal) * 100).round()}'),
-              label: settings.goal <= 0
-                  ? '${Metrics.thousands(steps)} adım atıldı'
-                  : (remaining == 0
-                      ? '${Metrics.thousands(steps - settings.goal)} adım fazlasıyla'
-                      : 'Hedefe ${Metrics.thousands(remaining)} adım kaldı'),
-            ),
-          ),
-          const SizedBox(height: 24),
           _TodayCard(
             steps: steps,
-            goal: settings.goal,
+            goal: step.effectiveGoal,
             waterMl: waterOn ? waterProvider.todayWater : null,
             breakdown: step.breakdownForDay(DateTime.now()),
           ),
@@ -144,7 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _WeeklyReportCard(
             weekSteps: step.thisWeekSteps,
             week: step.currentWeek(),
-            goal: settings.goal,
+            goal: step.effectiveGoal,
             // Detaylar yalnizca acikken hesaplanir.
             details: () => [
               for (final e in step.currentWeek())
@@ -638,7 +630,13 @@ class _RingWithDetail extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          StepRing(steps: steps, goal: goal),
+          FitnessRings(
+            steps: steps, 
+            goal: goal,
+            kcal: breakdown.kcal.toInt(),
+            minutes: breakdown.minutes,
+            km: breakdown.km,
+          ),
           if (waterMl != null)
             const Positioned(top: 0, right: 0, child: _WaterButton()),
         ],
@@ -701,31 +699,6 @@ class _WaterButton extends StatelessWidget {
   }
 }
 
-class _Pill extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String text;
-  const _Pill(this.icon, this.color, this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 15, color: color),
-        const SizedBox(width: 4),
-        Text(
-          text,
-          style: TextStyle(
-            color: AppColors.text,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class _MiniStat extends StatelessWidget {
   final IconData? icon;
@@ -873,6 +846,68 @@ class _SensorBanner extends StatelessWidget {
       child: Text(
         'Cihazda adım sensörü bulunamadı veya veri alınamıyor.',
         style: TextStyle(color: AppColors.textDim, fontSize: 13),
+      ),
+    );
+  }
+}
+
+class _BatteryBanner extends StatefulWidget {
+  const _BatteryBanner();
+
+  @override
+  State<_BatteryBanner> createState() => _BatteryBannerState();
+}
+
+class _BatteryBannerState extends State<_BatteryBanner> {
+  bool _ignored = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final status = await Permission.ignoreBatteryOptimizations.isGranted;
+    if (mounted) setState(() => _ignored = status);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_ignored || kIsWeb || defaultTargetPlatform != TargetPlatform.android) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.pick(const Color(0xFF332200), const Color(0xFFFFF4E5)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.pick(const Color(0xFF664400), const Color(0xFFFFD580))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Pil Optimizasyonu Uyarısı',
+            style: TextStyle(color: AppColors.pick(const Color(0xFFFFB74D), const Color(0xFFE65100)), fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Adımların arka planda doğru sayılabilmesi için uygulamanın pil optimizasyonunu kapatmanız önerilir.',
+            style: TextStyle(color: AppColors.textDim, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              TextButton(
+                onPressed: () async {
+                  await Permission.ignoreBatteryOptimizations.request();
+                  _check();
+                },
+                child: const Text('Kapat'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

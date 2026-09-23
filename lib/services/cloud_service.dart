@@ -488,4 +488,21 @@ class CloudService {
     }
     return 'Bulut hatasi: $e';
   }
+
+  /// Kullanıcının tüm bulut verilerini (Firestore) geri alınamaz şekilde siler.
+  Future<void> deleteUserData() async {
+    // Profil dokumanini sil
+    await _userDoc.delete();
+    
+    // Alt koleksiyon: data/steps
+    await _stepsDoc.delete();
+    
+    // Alt koleksiyon: years/*
+    final yearsSnap = await _yearsCol.get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (var doc in yearsSnap.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
 }

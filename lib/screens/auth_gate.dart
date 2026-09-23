@@ -31,8 +31,9 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    // Onceki izinle sessiz giris denemesi; basarisiz olursa sessizce gecer.
-    AuthService.instance.trySilentSignIn();
+    // Otomatik sessiz giris kaldirildi. 
+    // Sadece daha onceden basarili giris yapilmissa authStateChanges
+    // uzerinden dogrudan iceri alinacak.
   }
 
   Future<void> _skip() async {

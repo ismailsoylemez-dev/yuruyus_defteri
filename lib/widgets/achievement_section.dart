@@ -275,6 +275,23 @@ class _Badge extends StatelessWidget {
   final AchievementProgress item;
   const _Badge({required this.item});
 
+  List<Color> _getBadgeColors(String title) {
+    final tierColors = [
+      // Orange / Gold
+      [const Color(0xFFFFD700), const Color(0xFFFFA500), const Color(0xFFB8860B)],
+      // Blue / Diamond
+      [const Color(0xFF00FFFF), const Color(0xFF1E90FF), const Color(0xFF00008B)],
+      // Purple / Amethyst
+      [const Color(0xFFDDA0DD), const Color(0xFF8A2BE2), const Color(0xFF4B0082)],
+      // Pink / Ruby
+      [const Color(0xFFFF69B4), const Color(0xFFDC143C), const Color(0xFF8B0000)],
+      // Green / Emerald
+      [const Color(0xFF00FF7F), const Color(0xFF32CD32), const Color(0xFF006400)],
+    ];
+    // Hash tabanli renk secimi
+    return tierColors[title.hashCode % tierColors.length];
+  }
+
   void _showDetails(BuildContext context) {
     showBadgeDialog(context, item);
   }
@@ -290,23 +307,65 @@ class _Badge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: on ? AppColors.bestSoft : AppColors.surfaceAlt,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: on ? AppColors.best : AppColors.divider,
-              width: on ? 1.8 : 1,
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: on
+                  ? LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: _getBadgeColors(item.item.title),
+                      stops: const [0.1, 0.5, 0.9],
+                    )
+                  : LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppColors.surfaceAlt,
+                        AppColors.surfaceAlt.withValues(alpha: 0.5),
+                      ],
+                    ),
+              boxShadow: on
+                  ? [
+                      BoxShadow(
+                        color: _getBadgeColors(item.item.title)[1].withValues(alpha: 0.5),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                        offset: const Offset(0, 6),
+                      ),
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        blurRadius: 4,
+                        spreadRadius: 0,
+                        offset: const Offset(-2, -2), // Highlight
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        blurRadius: 8,
+                        spreadRadius: -2,
+                        offset: const Offset(4, 4), // Inner Shadow effect pseudo
+                      ),
+                    ]
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 4,
+                        offset: const Offset(2, 2),
+                      ),
+                    ],
+              border: Border.all(
+                color: on ? Colors.white.withValues(alpha: 0.5) : AppColors.divider,
+                width: on ? 2 : 1,
+              ),
             ),
-          ),
-          child: Icon(
-            item.item.icon,
-            size: 22,
-            color: on ? AppColors.best : AppColors.textDim,
-          ),
+            child: Icon(
+              item.item.icon,
+              size: 28,
+              color: on ? Colors.white : AppColors.textDim.withValues(alpha: 0.3),
+            ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         FittedBox(
           fit: BoxFit.scaleDown,
           child: Text(
@@ -390,30 +449,52 @@ void showBadgeDialog(BuildContext context, AchievementProgress item) {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 96,
-                  height: 96,
+                  width: 110,
+                  height: 110,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: on
-                        ? AppColors.bestSoft
-                        : AppColors.surfaceAlt.withValues(alpha: 0.9),
-                    border: Border.all(
-                      color: on ? AppColors.best : AppColors.divider,
-                      width: on ? 2.5 : 1.2,
-                    ),
+                    gradient: on
+                        ? LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              AppColors.pick(const Color(0xFF65A30D), const Color(0xFF22C55E)),
+                              AppColors.best,
+                              AppColors.pick(const Color(0xFF15803D), const Color(0xFF166534)),
+                            ],
+                          )
+                        : LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              AppColors.surfaceAlt,
+                              AppColors.surfaceAlt.withValues(alpha: 0.8),
+                            ],
+                          ),
                     boxShadow: on
                         ? [
                             BoxShadow(
-                              color: AppColors.best.withValues(alpha: 0.35),
+                              color: AppColors.best.withValues(alpha: 0.5),
                               blurRadius: 24,
+                              spreadRadius: 4,
+                              offset: const Offset(0, 8),
+                            ),
+                            BoxShadow(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              blurRadius: 4,
+                              offset: const Offset(-2, -2),
                             ),
                           ]
                         : null,
+                    border: Border.all(
+                      color: on ? Colors.white.withValues(alpha: 0.4) : AppColors.divider,
+                      width: on ? 2 : 1,
+                    ),
                   ),
                   child: Icon(
                     item.item.icon,
-                    size: 46,
-                    color: on ? AppColors.best : AppColors.textDim,
+                    size: 48,
+                    color: on ? Colors.white : AppColors.textDim.withValues(alpha: 0.5),
                   ),
                 ),
                 const SizedBox(height: 14),

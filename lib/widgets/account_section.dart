@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/step_provider.dart';
+import '../providers/water_provider.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../screens/login_screen.dart';
 
 /// Ayarlar ekranindaki hesap ve bulut yedekleme karti.
 class AccountSection extends StatelessWidget {
@@ -54,14 +56,44 @@ class AccountSection extends StatelessWidget {
             const SizedBox(height: 14),
             if (user == null)
               OutlinedButton.icon(
-                onPressed: () => _signIn(context),
+                onPressed: () => _openLogin(context),
                 icon: const Icon(Icons.login, size: 18),
-                label: const Text('Google ile giriş yap'),
+                label: const Text('Giriş yap / Kayıt ol'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.accent,
                   side: BorderSide(color: AppColors.divider),
                   minimumSize: const Size.fromHeight(46),
                 ),
+              )
+            else if (user.isAnonymous)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _openLogin(context, isLinking: true),
+                      icon: const Icon(Icons.link, size: 18),
+                      label: const Text("Hesabı Bağla/Yedekle"),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.accent,
+                        side: BorderSide(color: AppColors.divider),
+                        minimumSize: const Size.fromHeight(46),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _confirmSignOut(context),
+                      icon: const Icon(Icons.logout, size: 18),
+                      label: const Text('Çıkış yap'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFEF5350),
+                        side: BorderSide(color: AppColors.divider),
+                        minimumSize: const Size.fromHeight(46),
+                      ),
+                    ),
+                  ),
+                ],
               )
             else
               Row(
@@ -85,7 +117,7 @@ class AccountSection extends StatelessWidget {
                       icon: const Icon(Icons.logout, size: 18),
                       label: const Text('Çıkış yap'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFEF5350),
+                        foregroundColor: AppColors.text,
                         side: BorderSide(color: AppColors.divider),
                         minimumSize: const Size.fromHeight(46),
                       ),
@@ -93,28 +125,44 @@ class AccountSection extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () => _confirmDeleteAccount(context),
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Hesabı ve Verileri Sil'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFEF5350),
+                  side: BorderSide(color: AppColors.divider),
+                  minimumSize: const Size.fromHeight(46),
+                ),
+              ),
           ],
         ],
       ),
     );
   }
 
-  Future<void> _signIn(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final step = context.read<StepProvider>();
-    try {
-      final user = await AuthService.instance.signInWithGoogle();
-      if (user == null) return; // kullanici iptal etti
-      // Giris ekraninin bir daha atlanmamasi icin isaret kaldirilir.
-      await step.prefs.setSkipLogin(false);
-    } on AuthFailure catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(e.message)));
-    } catch (e) {
-      // AuthFailure disi bir hata (orn. GoogleSignIn.initialize) buradan
-      // kacip yakalanmamis async hataya donuyordu; giris ekranindaki
-      // karsiligi zaten boyle yakaliyor.
-      messenger.showSnackBar(SnackBar(content: Text('Beklenmeyen hata: $e')));
-    }
+  void _openLogin(BuildContext context, {bool isLinking = false}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => LoginScreen(
+          isLinking: isLinking,
+          onSkip: () {
+            Navigator.of(ctx).pop();
+            // Eger baglama tamamlandiysa state'i guncellemek icin
+            if (isLinking && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Hesap başarıyla bağlandı!')),
+              );
+              final step = context.read<StepProvider>();
+              step.prefs.setSkipLogin(false);
+              // rebuild tetiklemek icin settings ekranina bir sinyal gonderilebilir 
+              // (stateful olmadigi icin en temizi kullanicinin sayfadan cikip girmesi veya bir sekilde state'in yenilenmesidir, ancak authStateChanges genellikle bunu halleder)
+            }
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> _syncNow(BuildContext context) async {
@@ -136,7 +184,7 @@ class AccountSection extends StatelessWidget {
         backgroundColor: AppColors.surfaceAlt,
         title: const Text('Çıkış yapılsın mı?'),
         content: const Text(
-          'Adım geçmişin bulutta kalır. Aynı Gmail ile tekrar giriş '
+          'Adım geçmişin bulutta kalır. Aynı hesapla tekrar giriş '
           'yaptığında geri yüklenir.',
         ),
         actions: [
@@ -160,7 +208,60 @@ class AccountSection extends StatelessWidget {
     await step.flushCloud();
     step.attachCloud(null);
     await step.prefs.setSkipLogin(false);
+    
+    // YALNIZCA yerel verileri temizle, buluttaki silinmesin.
+    await step.clearLocalDataOnly();
+    if (context.mounted) {
+      final water = context.read<WaterProvider>();
+      await water.clearLocalDataOnly();
+    }
+    
     await AuthService.instance.signOut();
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final step = context.read<StepProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surfaceAlt,
+        title: const Text('Hesabı ve Verileri Sil?'),
+        content: const Text(
+          'Hesabınız ve buluttaki TÜM verileriniz kalıcı olarak silinecek. '
+          'Bu işlem geri alınamaz.\n\nEmin misiniz?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Hesabımı Sil',
+              style: TextStyle(color: Color(0xFFEF5350), fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    try {
+      step.attachCloud(null);
+      await step.prefs.setSkipLogin(false);
+      await step.clearLocalDataOnly();
+      if (context.mounted) {
+        final water = context.read<WaterProvider>();
+        await water.clearLocalDataOnly();
+      }
+      
+      await AuthService.instance.deleteAccount();
+    } catch (e) {
+      messenger.showSnackBar(const SnackBar(content: Text('Hesap silinemedi. Lütfen tekrar giriş yapıp deneyin.')));
+    }
   }
 }
 

@@ -11,7 +11,6 @@ import 'home_screen.dart';
 import 'route_screen.dart';
 import '../utils/root_nav.dart';
 import '../widgets/celebration.dart';
-import '../widgets/permission_intro.dart';
 import '../widgets/weekly_report_dialog.dart';
 
 class RootScreen extends StatefulWidget {
@@ -89,11 +88,6 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
     _step = context.read<StepProvider>();
     _step!.goalReached.addListener(_celebrate);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Ilk acilista izin istemlerinden once neden gerektiklerini acikla.
-      if (StepProvider.isMobile && !_step!.prefs.introShown) {
-        await showPermissionIntro(context);
-        await _step!.prefs.setIntroShown();
-      }
       if (!mounted) return;
       _calibrateStride();
       _step!.start().then((_) {

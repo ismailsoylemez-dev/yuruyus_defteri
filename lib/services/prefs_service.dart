@@ -10,6 +10,7 @@ import '../utils/intensity.dart';
 /// okunamaz hale gelir.
 class PrefsKeys {
   static const goal = 'goal';
+  static const smartGoal = 'smart_goal';
 
   /// Su takibi acik mi (Ayarlar). Native servis de okur: flutter.water_enabled
   static const waterEnabled = 'water_enabled';
@@ -66,6 +67,9 @@ class PrefsKeys {
   static const waterGoal = 'water_goal_ml';
   static const defaultWaterGoal = 2500;
   static const lastWeeklyReport = 'last_weekly_report';
+  
+  /// Sanal Rotalar
+
 
   /// Varsayilanlar da paylasilir; arka plan ile UI farkli deger kullanmamali.
   static const defaultGoal = 8000;
@@ -86,6 +90,9 @@ class PrefsService {
 
   int get goal => _p.getInt(PrefsKeys.goal) ?? PrefsKeys.defaultGoal;
   Future<void> setGoal(int v) => _p.setInt(PrefsKeys.goal, v);
+
+  bool get smartGoal => _p.getBool(PrefsKeys.smartGoal) ?? false;
+  Future<void> setSmartGoal(bool v) => _p.setBool(PrefsKeys.smartGoal, v);
 
   int get heightCm => _p.getInt(PrefsKeys.height) ?? PrefsKeys.defaultHeight;
   Future<void> setHeight(int v) => _p.setInt(PrefsKeys.height, v);
@@ -199,13 +206,16 @@ class PrefsService {
   Future<void> setUnlockedBadges(Set<String> v) =>
       _p.setStringList(PrefsKeys.unlockedBadges, v.toList()..sort());
 
+
+
   String get goalCelebratedOn => _p.getString(PrefsKeys.goalCelebratedOn) ?? '';
   Future<void> setGoalCelebratedOn(String v) =>
       _p.setString(PrefsKeys.goalCelebratedOn, v);
 
   bool get introShown => _p.getBool(PrefsKeys.introShown) ?? false;
-  Future<void> setIntroShown() => _p.setBool(PrefsKeys.introShown, true);
 
+  Future<void> setIntroShown(bool v) => _p.setBool(PrefsKeys.introShown, v);
+  
   bool get lightTheme => _p.getBool(PrefsKeys.lightTheme) ?? false;
   Future<void> setLightTheme(bool v) => _p.setBool(PrefsKeys.lightTheme, v);
 

@@ -254,6 +254,7 @@ class StepService : Service(), SensorEventListener {
         scheduleMidnight()
         scheduleEvening()
         scheduleWeekly()
+        scheduleStandup()
 
         val sm = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val sensor = sm?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)

@@ -113,6 +113,27 @@ class StepProvider extends ChangeNotifier {
 
   Map<String, int> get history => _history;
 
+  /// Akıllı hedef açıksa son 7 günün ortalamasının %5 fazlası, değilse sabit hedef.
+  int get effectiveGoal {
+    if (!prefs.smartGoal) return prefs.goal;
+    
+    final todayKey = Metrics.dayKey(DateTime.now());
+    var sum = 0;
+    var count = 0;
+    
+    final sortedKeys = _history.keys.where((k) => k != todayKey).toList()..sort();
+    for (var k in sortedKeys.reversed) {
+      sum += _history[k] ?? 0;
+      count++;
+      if (count == 7) break;
+    }
+    
+    if (count == 0 || sum == 0) return prefs.goal;
+    final avg = sum ~/ count;
+    final target = (avg * 1.05).round();
+    return target.clamp(1000, 40000);
+  }
+
   /// Kalici bildirim servisi gercekten calisiyor mu.
   bool get backgroundRunning => ForegroundService.running;
 
@@ -236,6 +257,15 @@ class StepProvider extends ChangeNotifier {
     });
     if (first == null || last == null) return null;
     return activeMinutesBetween(first!, last!);
+  }
+
+  /// Tum zamanlarin toplam kilometresini hesaplar (Sanal Rotalar icin)
+  double getTotalDistanceKm() {
+    int totalSteps = 0;
+    _history.forEach((k, v) {
+      if (v > 0) totalSteps += v;
+    });
+    return Metrics.distanceKm(totalSteps, prefs.heightCm);
   }
 
   void _restore() {
@@ -1114,6 +1144,27 @@ class StepProvider extends ChangeNotifier {
         history: Map<String, int>.from(_history),
         hourly: _hourly.map((k, v) => MapEntry(k, List<int>.from(v))),
       );
+
+  /// Sadece yerel verileri (cihazdaki adımlar, rotalar vs.) temizler.
+  /// Buluttaki (Firebase) verilere dokunmaz. Çıkış yaparken kullanılır.
+  Future<void> clearLocalDataOnly() async {
+    await prefs.clearAll();
+    _history = {};
+    _hourly = {};
+    _intensity = {};
+    _savedToday = 0;
+    _todaySteps = 0;
+    _baseline = -1;
+    _date = Metrics.dayKey(DateTime.now());
+    _goalNotifiedFor = '';
+    _overridden = {};
+    
+    await ForegroundService.clear();
+    await RouteService.clear(); // Sadece yerel dosyalar silinir
+    
+    await refreshAll(force: true);
+    notifyListeners();
+  }
 
   Future<void> resetData() async {
     await prefs.clearAll();

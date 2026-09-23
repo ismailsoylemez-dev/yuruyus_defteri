@@ -75,6 +75,13 @@ class WaterProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sadece yerel verileri temizler. Çıkış yaparken kullanılır.
+  Future<void> clearLocalDataOnly() async {
+    _water = {};
+    await prefs.setWater(_water);
+    notifyListeners();
+  }
+
   /// "Tum kayitlari sil": bellekteki ve diskteki su kaydi temizlenir.
   /// Buluttaki su verisi yil dokumanlarinda; onlar StepProvider.resetData
   /// icindeki clearRemote ile birlikte silinir.

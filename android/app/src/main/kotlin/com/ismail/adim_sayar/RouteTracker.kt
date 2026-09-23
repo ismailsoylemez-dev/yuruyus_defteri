@@ -45,14 +45,13 @@ class RouteTracker(
         const val K_ROUTE_ENABLED = "routeEnabled"
         private const val DIR = "routes"
 
-        /** GPS'i acmak icin [START_WINDOW_MS] icinde gereken adim. */
-        private const val START_STEPS = 15
-        private const val START_WINDOW_MS = 45_000L
+        /** GPS'i acmak icin [START_WINDOW_MS] icinde gereken adim. Sensor gurultusu icin yukseltildi. */
+        private const val START_STEPS = 25
+        private const val START_WINDOW_MS = 60_000L
 
-        /** Bu kadar adim gelmezse GPS kapanir. */
-        /** Durunca GPS en gec ~1,5-2 dk icinde kapanir (pil). */
-        private const val IDLE_STOP_MS = 90_000L
-        private const val IDLE_CHECK_MS = 20_000L
+        /** Bu kadar adim gelmezse GPS kapanir (Pil optimizasyonu icin 60s). */
+        private const val IDLE_STOP_MS = 60_000L
+        private const val IDLE_CHECK_MS = 15_000L
 
         /** Bundan uzun bosluk yeni parca baslatir. */
         private const val SEGMENT_GAP_MS = 300_000L

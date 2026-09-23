@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../providers/settings_provider.dart';
 import '../providers/step_provider.dart';
@@ -52,8 +53,16 @@ class SettingsScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _GoalSlider(settings: settings, step: step),
-                  _GoalSuggestion(step: step, settings: settings),
+                  _SwitchRow(
+                    label: 'Akıllı Hedef',
+                    sub: 'Son 7 günün ortalamasına göre günlük hedef belirler.',
+                    value: settings.smartGoal,
+                    onChanged: (v) async {
+                      await settings.setSmartGoal(v);
+                    },
+                  ),
+                  if (!settings.smartGoal) _GoalSlider(settings: settings, step: step),
+                  if (!settings.smartGoal) _GoalSuggestion(step: step, settings: settings),
                 ],
               ),
             ),
@@ -172,37 +181,68 @@ class SettingsScreen extends StatelessWidget {
             title: 'Sensör',
             subtitle: 'Adımları telefonun donanım adım sayacından okur. '
                 'Sayım durursa veya izin sıfırlanırsa buradan yeniden bağlayın.',
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: Text(
-                    switch (step.state) {
-                      SensorState.running => 'Aktif - veri alınıyor',
-                      SensorState.demo => 'Demo modu (web/masaüstü - sahte veri)',
-                      SensorState.denied => 'İzin verilmedi',
-                      SensorState.unavailable => 'Sensör bulunamadı',
-                      SensorState.idle => 'Başlatılmadı',
-                    },
-                    style: TextStyle(color: AppColors.textDim, fontSize: 13.5),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        switch (step.state) {
+                          SensorState.running => 'Aktif - veri alınıyor',
+                          SensorState.demo => 'Demo modu (web/masaüstü - sahte veri)',
+                          SensorState.denied => 'İzin verilmedi',
+                          SensorState.unavailable => 'Sensör bulunamadı',
+                          SensorState.idle => 'Başlatılmadı',
+                        },
+                        style: TextStyle(color: AppColors.textDim, fontSize: 13.5),
+                      ),
+                    ),
+                    _BusyButton(
+                      label: step.state == SensorState.running
+                          ? 'Yeniden bağlan'
+                          : 'İzin iste',
+                      task: () async {
+                        await step.start();
+                        return switch (step.state) {
+                          SensorState.running =>
+                            'Sensör bağlandı - izin: ${step.permissionLabel}',
+                          SensorState.denied =>
+                            'İzin verilmedi (${step.permissionLabel})',
+                          SensorState.unavailable =>
+                            'Sensör okunamadı: ${step.lastError ?? 'bilinmiyor'}',
+                          SensorState.demo => 'Demo modu - gerçek sensör yok',
+                          SensorState.idle => 'Sensör başlatılamadı',
+                        };
+                      },
+                    ),
+                  ],
                 ),
-                _BusyButton(
-                  label: step.state == SensorState.running
-                      ? 'Yeniden bağlan'
-                      : 'İzin iste',
-                  task: () async {
-                    await step.start();
-                    return switch (step.state) {
-                      SensorState.running =>
-                        'Sensör bağlandı - izin: ${step.permissionLabel}',
-                      SensorState.denied =>
-                        'İzin verilmedi (${step.permissionLabel})',
-                      SensorState.unavailable =>
-                        'Sensör okunamadı: ${step.lastError ?? 'bilinmiyor'}',
-                      SensorState.demo => 'Demo modu - gerçek sensör yok',
-                      SensorState.idle => 'Sensör başlatılamadı',
-                    };
-                  },
+                const Divider(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Pil Optimizasyonu\n(Arka plan sayımı için kapatılmalı)',
+                        style: TextStyle(color: AppColors.textDim, fontSize: 13.5),
+                      ),
+                    ),
+                    _BusyButton(
+                      label: 'Kontrol Et',
+                      task: () async {
+                        final status = await Permission.ignoreBatteryOptimizations.status;
+                        if (status.isGranted) {
+                          return 'Pil optimizasyonu zaten kapalı, arka plan takibi güvende.';
+                        } else {
+                          final result = await Permission.ignoreBatteryOptimizations.request();
+                          if (result.isGranted) {
+                            return 'Harika! Optimizasyon kapatıldı.';
+                          } else {
+                            return 'Ayarlardan optimizasyon kapatılmadı.';
+                          }
+                        }
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),

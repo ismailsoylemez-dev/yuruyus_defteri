@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'cloud_service.dart';
 
 /// Giris hatalarinin kullaniciya gosterilebilir hali.
 class AuthFailure implements Exception {
@@ -104,6 +105,137 @@ class AuthService {
     return result.user;
   }
 
+  /// Misafir hesabi Google hesabina baglar.
+  Future<User?> linkWithGoogle() async {
+    if (!available) {
+      throw const AuthFailure('Bulut yedekleme bu platformda kullanılamıyor.');
+    }
+    GoogleSignInAccount account;
+    try {
+      account = await GoogleSignIn.instance.authenticate();
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) return null;
+      throw AuthFailure(_mapGoogleError(e));
+    }
+
+    final auth = account.authentication;
+    final idToken = auth.idToken;
+    if (idToken == null) {
+      throw const AuthFailure('Kimlik dogrulanamadi.');
+    }
+    
+    final credential = GoogleAuthProvider.credential(idToken: idToken);
+    try {
+      final result = await FirebaseAuth.instance.currentUser?.linkWithCredential(credential);
+      return result?.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
+  /// Telefon numarasi ile dogrulama kodu gonderir
+  Future<void> verifyPhoneNumber({
+    required String phoneNumber,
+    required void Function(PhoneAuthCredential) verificationCompleted,
+    required void Function(FirebaseAuthException) verificationFailed,
+    required void Function(String, int?) codeSent,
+    required void Function(String) codeAutoRetrievalTimeout,
+  }) async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    await FirebaseAuth.instance.verifyPhoneNumber(
+      phoneNumber: phoneNumber,
+      verificationCompleted: verificationCompleted,
+      verificationFailed: verificationFailed,
+      codeSent: codeSent,
+      codeAutoRetrievalTimeout: codeAutoRetrievalTimeout,
+    );
+  }
+
+  /// Gelen SMS koduyla telefon oturumunu tamamlar
+  Future<User?> signInWithPhoneCredential(String verificationId, String smsCode) async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    try {
+      PhoneAuthCredential credential = PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: smsCode,
+      );
+      final result = await FirebaseAuth.instance.signInWithCredential(credential);
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
+  /// Mevcut anonim hesabi SMS koduyla baglar
+  Future<User?> linkWithPhoneCredential(String verificationId, String smsCode) async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    final user = currentUser;
+    if (user == null) throw const AuthFailure('Oturum açık değil.');
+    
+    try {
+      PhoneAuthCredential credential = PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: smsCode,
+      );
+      final result = await user.linkWithCredential(credential);
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
+  /// Misafir olarak giris (Anonim)
+  Future<User?> signInAnonymously() async {
+    if (!available) return null;
+    try {
+      final result = await FirebaseAuth.instance.signInAnonymously();
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
+
+
+  /// Email ve Sifre ile giris
+  Future<User?> signInWithEmailAndPassword(String email, String password) async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    try {
+      final result = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
+  /// Mevcut anonim hesabi Email ve Sifre ile baglar
+  Future<User?> linkWithEmailAndPassword(String email, String password) async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    final user = currentUser;
+    if (user == null) throw const AuthFailure('Oturum açık değil.');
+    
+    try {
+      final credential = EmailAuthProvider.credential(email: email, password: password);
+      final result = await user.linkWithCredential(credential);
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
+  /// Email ve Sifre ile kayit
+  Future<User?> registerWithEmailAndPassword(String email, String password) async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    try {
+      final result = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: password);
+      return result.user;
+    } on FirebaseAuthException catch (e) {
+      throw AuthFailure(_mapFirebaseError(e));
+    }
+  }
+
   Future<void> signOut() async {
     if (!available) return;
     try {
@@ -112,6 +244,34 @@ class AuthService {
       // Google tarafi temizlenemese de Firebase oturumu kapatilir.
     }
     await FirebaseAuth.instance.signOut();
+  }
+
+  /// Hesabı ve buluttaki verileri kalıcı olarak siler
+  Future<void> deleteAccount() async {
+    if (!available) throw const AuthFailure('Bulut yedekleme kullanılamıyor.');
+    final user = currentUser;
+    if (user == null) throw const AuthFailure('Oturum açık değil.');
+
+    try {
+      // 1. Önce buluttaki verileri temizle
+      final cloud = CloudService(user.uid);
+      await cloud.deleteUserData();
+
+      // 2. Google Session'ı temizle (Varsa)
+      try {
+        await GoogleSignIn.instance.signOut();
+      } catch (_) {}
+
+      // 3. Hesabı sil
+      await user.delete();
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'requires-recent-login') {
+        throw const AuthFailure('Güvenlik nedeniyle hesabı silmek için lütfen çıkış yapıp tekrar giriş yapın.');
+      }
+      throw AuthFailure(_mapFirebaseError(e));
+    } catch (e) {
+      throw AuthFailure('Hesap silinemedi: $e');
+    }
   }
 
   String _mapGoogleError(GoogleSignInException e) {
@@ -134,6 +294,8 @@ class AuthService {
       'operation-not-allowed' =>
         'Google saglayicisi Firebase konsolunda acik degil.',
       'invalid-credential' => 'Kimlik bilgisi gecersiz veya suresi dolmus.',
+      'invalid-verification-code' => 'Doğrulama kodu hatalı.',
+      'invalid-phone-number' => 'Telefon numarası geçersiz. Lütfen ülke koduyla birlikte girin (+90...)',
       _ => 'Giris basarisiz oldu (${e.code}).',
     };
   }

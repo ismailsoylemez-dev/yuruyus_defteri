@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../providers/settings_provider.dart';
 import '../providers/step_provider.dart';
+import '../theme/app_theme.dart';
 import '../utils/achievements.dart';
+import '../utils/root_nav.dart';
 import '../widgets/achievement_section.dart';
 import '../widgets/all_time_card.dart';
 
@@ -28,7 +30,19 @@ class AchievementsScreen extends StatelessWidget {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Başarılar')),
+      appBar: AppBar(
+        title: const Text('Başarılar'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: IconButton(
+              tooltip: 'Ayarlar',
+              onPressed: () => RootNav.openSettings(),
+              icon: Icon(Icons.settings_outlined, color: AppColors.textDim),
+            ),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [

@@ -9,6 +9,7 @@ import 'providers/settings_provider.dart';
 import 'providers/step_provider.dart';
 import 'providers/water_provider.dart';
 import 'screens/auth_gate.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/root_screen.dart';
 import 'services/auth_service.dart';
 import 'services/notification_service.dart';
@@ -105,9 +106,9 @@ class AdimSayarApp extends StatelessWidget {
           maxScaleFactor: 1.25,
           child: child!,
         ),
-        // Firebase yapilandirmasi yoksa giris akisi atlanir, uygulama
-        // eskisi gibi yalniz cihaz uzerinde calisir.
-        home: firebaseReady ? AuthGate(prefs: prefs) : const RootScreen(),
+        home: !prefs.introShown
+            ? OnboardingScreen(prefs: prefs, firebaseReady: firebaseReady)
+            : (firebaseReady ? AuthGate(prefs: prefs) : const RootScreen()),
         ),
       ),
     );

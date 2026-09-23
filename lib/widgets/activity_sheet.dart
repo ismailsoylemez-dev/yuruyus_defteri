@@ -233,19 +233,23 @@ class ActivityBreakdownView extends StatelessWidget {
         _ShareBar(b: b),
         const SizedBox(height: 7),
         // Renklerin anlami: cubuk kalori payini gosterir.
-        Row(
-          children: [
-            _Legend(color: ActivityColors.normal, text: 'Normal'),
-            const SizedBox(width: 10),
-            _Legend(color: ActivityColors.brisk, text: 'Tempolu'),
-            const SizedBox(width: 10),
-            _Legend(color: ActivityColors.run, text: 'Koşu'),
-            const Spacer(),
-            Text(
-              'kalori payı',
-              style: TextStyle(color: AppColors.textDim, fontSize: 11.5),
-            ),
-          ],
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            children: [
+              _Legend(color: ActivityColors.normal, text: 'Normal'),
+              const SizedBox(width: 10),
+              _Legend(color: ActivityColors.brisk, text: 'Tempolu'),
+              const SizedBox(width: 10),
+              _Legend(color: ActivityColors.run, text: 'Koşu'),
+              const SizedBox(width: 20),
+              Text(
+                'kalori payı',
+                style: TextStyle(color: AppColors.textDim, fontSize: 11.5),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         _PartBlock(
@@ -524,21 +528,31 @@ class ActivityStrip extends StatelessWidget {
         const SizedBox(height: 8),
         Row(
           children: [
-            _Legend(
-              color: ActivityColors.normal,
-              text: 'Normal ${Metrics.duration(b.normal.minutes)}',
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _Legend(
+                      color: ActivityColors.normal,
+                      text: 'Normal ${Metrics.duration(b.normal.minutes)}',
+                    ),
+                    const SizedBox(width: 12),
+                    _Legend(
+                      color: ActivityColors.brisk,
+                      text: 'Tempolu ${Metrics.duration(b.brisk.minutes)}',
+                    ),
+                    const SizedBox(width: 12),
+                    _Legend(
+                      color: ActivityColors.run,
+                      text: 'Koşu ${Metrics.duration(b.run.minutes)}',
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(width: 10),
-            _Legend(
-              color: ActivityColors.brisk,
-              text: 'Tempolu ${Metrics.duration(b.brisk.minutes)}',
-            ),
-            const SizedBox(width: 10),
-            _Legend(
-              color: ActivityColors.run,
-              text: 'Koşu ${Metrics.duration(b.run.minutes)}',
-            ),
-            const Spacer(),
             Icon(Icons.chevron_right, size: 18, color: AppColors.textDim),
           ],
         ),
@@ -618,26 +632,21 @@ class _Legend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Flexible(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: AppColors.textDim, fontSize: 11),
-            ),
-          ),
-        ],
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          maxLines: 1,
+          style: TextStyle(color: AppColors.textDim, fontSize: 11),
+        ),
+      ],
     );
   }
 }

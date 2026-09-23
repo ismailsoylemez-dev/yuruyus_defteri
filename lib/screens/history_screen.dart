@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/step_provider.dart';
 import '../providers/water_provider.dart';
+import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/aggregate.dart';
 import '../utils/intensity.dart';
 import '../utils/metrics.dart';
+import '../utils/root_nav.dart';
 import '../widgets/activity_sheet.dart';
 import '../widgets/hour_chart.dart';
 import '../widgets/info_card.dart';
@@ -52,7 +54,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   /// Tempo kartindaki "Rotayi gor": o gunun haritasi.
   void _openRoute(DateTime day) async {
-    final pts = await RouteService.load(day);
+    final pts = await RouteService.load(day, day);
     if (!mounted) return;
     if (pts.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -112,7 +114,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     if (step.recordedDays == 0 && step.todaySteps == 0) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Geçmiş')),
+        appBar: AppBar(
+          title: const Text('Geçmiş'),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: IconButton(
+                tooltip: 'Ayarlar',
+                onPressed: () => RootNav.openSettings(),
+                icon: Icon(Icons.settings_outlined, color: AppColors.textDim),
+              ),
+            ),
+          ],
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
@@ -148,7 +162,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Geçmiş')),
+      appBar: AppBar(
+        title: const Text('Geçmiş'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: IconButton(
+              tooltip: 'Ayarlar',
+              onPressed: () => RootNav.openSettings(),
+              icon: Icon(Icons.settings_outlined, color: AppColors.textDim),
+            ),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
         children: [
@@ -203,6 +229,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   : null,
             ),
             const SizedBox(height: 12),
+            _InsightCard(period: _period, offset: _offset, step: step),
+            const SizedBox(height: 12),
             PeriodChart(
               series: series,
               goal: goal,
@@ -233,14 +261,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   _noData(s == e ? 'Bu gün' : 'Bu ay');
                   return;
                 }
-                if (s == e) {
-                  // Gun sekmesinde baska gune dokunuldu: sayfa o gune gecer.
-                  if (_period == Period.day) {
-                    _goToDay(s);
-                  } else {
-                    setState(() => _selectedDate = s);
-                  }
-                }
+                
+                final title = s == e 
+                    ? '${Metrics.numericDate(s)} ${Metrics.longLabel(s)}'
+                    : '${Metrics.fullLabel(s)} ${s.year} Özeti';
+                    
+                showActivitySheet(
+                  context,
+                  title: title,
+                  breakdown: step.breakdownBetween(s, e),
+                );
               },
             ),
             const SizedBox(height: 16),
@@ -315,11 +345,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
               color: AppColors.surfaceAlt,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.auto_graph_outlined,
-                size: 48, color: AppColors.primary),
+            child: Icon(Icons.auto_graph_outlined,
+                size: 48, color: AppColors.accent),
           ),
           const SizedBox(height: 24),
-          const Text(
+          Text(
             'Kayıt Bulunamadı',
             style: TextStyle(
               color: AppColors.text,
@@ -329,7 +359,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Seçtiğiniz zaman aralığında herhangi bir\nadım kaydı bulunmuyor.',
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -424,24 +454,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
     ActivityBreakdown bd,
   ) {
     var days = 0;
-    var goalDays = 0;
     var bestVal = 0;
     var bestKey = range.start;
     history.forEach((k, v) {
       final d = Metrics.tryParseKey(k);
       if (d == null || d.isBefore(range.start) || d.isAfter(range.end)) return;
       if (v > 0) days++;
-      if (goal > 0 && v >= goal) goalDays++;
       if (v > bestVal) {
         bestVal = v;
         bestKey = d;
       }
     });
-
-    final today = _today();
-    final end = range.end.isAfter(today) ? today : range.end;
-    final spanDays =
-        end.isBefore(range.start) ? 0 : end.difference(range.start).inDays + 1;
 
     return [
       const _SectionCaption('Günlük ortalama'),
@@ -459,12 +482,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         label: bestVal == 0
             ? 'Bu dönemde kayıt yok'
             : 'En iyi gün - ${Metrics.fullLabel(bestKey)} ${bestKey.year}',
-      ),
-      const SizedBox(height: 10),
-      StatTile(
-        icon: Icons.flag_outlined,
-        value: '$goalDays / $days gün',
-        label: 'Hedefe ulaşılan gün (Toplam kayıtlı gün)',
       ),
     ];
   }
@@ -657,6 +674,81 @@ class _TempoCard extends StatelessWidget {
     );
   }
 }
+
+class _InsightCard extends StatelessWidget {
+  final Period period;
+  final int offset;
+  final StepProvider step;
+
+  const _InsightCard({
+    required this.period,
+    required this.offset,
+    required this.step,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (period != Period.week && period != Period.month) return const SizedBox.shrink();
+    
+    final currentRange = Aggregate.range(period, offset);
+    final previousRange = Aggregate.range(period, offset - 1);
+    
+    final currentTotal = Aggregate.totalBetween(step.history, currentRange.start, currentRange.end);
+    final previousTotal = Aggregate.totalBetween(step.history, previousRange.start, previousRange.end);
+    
+    if (previousTotal == 0 || currentTotal == 0) return const SizedBox.shrink(); // Yeterli veri yok
+    
+    final diff = currentTotal - previousTotal;
+    final percent = (diff / previousTotal * 100).round();
+    
+    final String message;
+    final IconData icon;
+    final Color color;
+    
+    final periodName = period == Period.week ? 'haftaya' : 'aya';
+    
+    if (percent > 0) {
+      message = 'Geçen $periodName göre %$percent daha fazla yürüdün, harika gidiyorsun!';
+      icon = Icons.trending_up;
+      color = AppColors.best;
+    } else if (percent < 0) {
+      message = 'Geçen $periodName göre %${percent.abs()} daha az yürüdün. Hedefine ulaşmak için temponu artır!';
+      icon = Icons.trending_down;
+      color = Colors.orange;
+    } else {
+      message = 'Geçen ayla tam olarak aynı tempodasın. İstikrarını koruyorsun!';
+      icon = Icons.trending_flat;
+      color = Colors.blue;
+    }
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _BreakdownTile extends StatelessWidget {
   final _Row row;

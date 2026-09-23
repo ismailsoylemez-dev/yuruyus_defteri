@@ -12,9 +12,16 @@ class SettingsProvider extends ChangeNotifier {
   int get goal => _prefs.goal;
   int get heightCm => _prefs.heightCm;
   double get weightKg => _prefs.weightKg;
+  
+  bool get smartGoal => _prefs.smartGoal;
 
   Future<void> setGoal(int v) async {
     await _prefs.setGoal(v.clamp(1000, 40000));
+    notifyListeners();
+  }
+
+  Future<void> setSmartGoal(bool v) async {
+    await _prefs.setSmartGoal(v);
     notifyListeners();
   }
 
