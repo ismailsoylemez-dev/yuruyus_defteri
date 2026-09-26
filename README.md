@@ -1,60 +1,87 @@
 # Yürüyüş Defteri 🚶‍♂️
 
-Yürüyüş Defteri, açık kaynaklı, reklamsız ve gizliliğe önem veren kişisel bir adım sayar ve yürüyüş takip uygulamasıdır. Sağlıklı bir yaşam için günlük adımlarınızı takip ederken, aynı zamanda harita üzerinden yürüyüş rotalarınızı da kaydedebilirsiniz.
+Yürüyüş Defteri, açık kaynaklı, reklamsız ve gizliliğe önem veren, tamamen kullanıcı odaklı bir sağlık ve aktivite takip uygulamasıdır. Günlük adımlarınızı saymanın ötesinde, yürüyüş rotalarınızı harita üzerinde canlı olarak çizer, su ve kilo takibinizi yapar, geçmiş verilerinizi ısı haritaları (heatmap) ve detaylı grafiklerle analiz eder.
 
-## 🌟 Özellikler
+Uygulama, hem yerel cihaz sensörlerini hem de bulut tabanlı (Firebase) veri senkronizasyonunu birleştirerek modern bir sağlık asistanı deneyimi sunar.
 
-- **Gelişmiş Adım Sayar:** Cihaz sensörlerini (Pedometer) kullanarak doğru ve tutarlı adım sayımı.
-- **Rota Takibi:** `flutter_map` ve `Geolocator` entegrasyonu ile yürüyüşlerinizi harita üzerinde canlı takip edip kaydedebilirsiniz (Google API Anahtarı gerektirmez).
-- **Reklamsız Deneyim:** Hiçbir reklam veya dikkat dağıtıcı öğe olmadan sade, temiz kullanım.
-- **Firebase Entegrasyonu:** Google Sign-in ile kolay giriş, Firestore ile güvenli bulut senkronizasyonu.
-- **Home Widget:** Ana ekranınızda günlük adımlarınızı anlık olarak takip edebileceğiniz widget desteği.
-- **Paylaşım Özelliği:** Yürüyüş verilerinizi ve başardığınız hedefleri şık bir kart tasarımı (screenshot & share_plus) ile arkadaşlarınızla paylaşın.
-- **Yerel Bildirimler:** Hedefinize ulaştığınızda ve günlük motivasyon uyarılarıyla haberdar olun.
-- **Insights & Isı Haritası:** Adım verilerinizin geçmişe dönük istatistikleri ve GitHub benzeri katkı/ısı haritası.
+---
 
-## 📱 Ekran Görüntüleri
+## 🌟 Öne Çıkan Özellikler ve Sayfalar
 
-Proje ekran görüntülerini incelemek için aşağıdaki önizlemelere göz atabilirsiniz:
+### 1. Ana Ekran ve Adım Takibi (`home_screen.dart`)
+- **Sensör Tabanlı Hassas Ölçüm:** Cihazın yerleşik pedometre sensörlerini kullanarak düşük pil tüketimiyle sürekli adım takibi yapar.
+- **Gerçek Zamanlı Metrikler:** Atılan adımlara göre anlık mesafe (km/m), yakılan kalori (kcal) ve aktif süre hesaplanır.
+- **Hedef Takibi:** Günlük adım hedefinizi dairesel ilerleme çubukları ve motive edici görsel geri bildirimlerle gösterir.
 
-| Ana Ekran (Adım Sayar) | Rota Takibi | İstatistikler (Heatmap) | Paylaşım / Profil |
-| :---: | :---: | :---: | :---: |
-| <img src="screenshots/home.png" width="200" alt="Ana Ekran"> | <img src="screenshots/route.png" width="200" alt="Rota Takibi"> | <img src="screenshots/heatmap.png" width="200" alt="İstatistikler"> | <img src="screenshots/profile.png" width="200" alt="Profil"> |
+### 2. Canlı Rota Takibi (`route_screen.dart`)
+- **GPS ve Harita Entegrasyonu:** `flutter_map` (OpenStreetMap tabanlı) ve `geolocator` kullanarak anlık konumunuzu haritada gösterir.
+- **Canlı Rota Çizimi:** Yürüyüş, koşu veya bisiklet aktiviteleriniz sırasında geçtiğiniz yolları gerçek zamanlı olarak (Polyline) çizer.
+- **Hava Durumu:** Aktivite esnasında bölgesel hava durumu verisini anlık olarak yansıtır (`weather_service.dart`).
+- **Aktivite Kaydı:** Tamamlanan rotalar süre, ortalama hız ve katedilen mesafe ile birlikte cihaz hafızasına ve buluta kaydedilir.
 
-> *Not: Ekran görüntülerini eklemek için uygulamanızdan aldığınız görüntüleri `screenshots` klasörüne aynı isimlerle (örneğin `home.png`, `route.png`) kaydediniz.*
+### 3. Gelişmiş İstatistikler ve Analizler
+- **Isı Haritası (`heatmap_screen.dart`):** GitHub benzeri bir contribution (katkı) takvimi ile yıl içindeki aktivite yoğunluğunuzu görselleştirir. Hangi günlerde daha aktif olduğunuzu tek bakışta anlayabilirsiniz.
+- **Detaylı Analiz (`insights_screen.dart`):** Haftalık, aylık ve yıllık bazda adım, mesafe ve yakılan kalori trendlerinizi grafiklerle sunar. Ortalama aktivite düzeyinizi analiz eder.
+- **Geçmiş Günlükler (`history_screen.dart`):** Geçmişe dönük tüm aktivitelerinizi ve günlük özetlerinizi listeler.
 
-## 🛠 Kullanılan Teknolojiler
+### 4. Sağlık ve Beslenme Takibi
+- **Su Tüketimi (`water_screen.dart`):** Günlük su içme hedefinizi belirler, her bardak su içtiğinizde hızlıca kayıt almanızı sağlar. Animasyonlu sıvı dolum efektleriyle motivasyonu artırır.
+- **Kilo Takibi (`weight_screen.dart`):** Düzenli kilo girişleri ile form grafiğinizi takip etmenize olanak tanır.
 
-- **[Flutter](https://flutter.dev/):** Cross-platform UI geliştirme kiti.
-- **[Provider](https://pub.dev/packages/provider):** State (Durum) yönetimi.
-- **[Firebase Auth & Firestore](https://firebase.google.com/):** Arka uç, kimlik doğrulama ve veritabanı.
-- **[Pedometer](https://pub.dev/packages/pedometer):** Cihaz sensöründen adım verisi okuma.
-- **[Flutter Map](https://pub.dev/packages/flutter_map) & [Geolocator](https://pub.dev/packages/geolocator):** Harita gösterimi ve konum alma.
-- **[Home Widget](https://pub.dev/packages/home_widget):** Android ve iOS için ana ekran widget geliştirmesi.
+### 5. Kimlik Doğrulama ve Bulut Yedekleme
+- **Çoklu Giriş Yöntemleri:** `email_auth_screen.dart`, `phone_auth_screen.dart` ve Google Sign-in seçenekleriyle Firebase Authentication üzerinden güvenli oturum açma imkanı sunar.
+- **Bulut Senkronizasyonu (`cloud_service.dart` & `backup_service.dart`):** Tüm yürüyüş, su, kilo ve ayar verileriniz güvenli bir şekilde Firestore'a senkronize edilir. Cihaz değiştirseniz bile verileriniz kaybolmaz.
+
+### 6. Arka Plan Hizmetleri ve Bildirimler
+- **Foreground Service (`foreground_service.dart`):** Uygulama kapalıyken bile adımlarınızın hatasız sayılmaya devam etmesini sağlayan Android ön plan servisi altyapısı.
+- **Bildirimler (`notification_service.dart`):** Günlük adım ve su hedeflerinize ulaştığınızda yerel bildirimlerle (Local Notifications) sizi tebrik eder.
+- **Ana Ekran Widget'ı (`widget_service.dart`):** Uygulamaya girmeden anlık adım sayınızı cihazınızın ana ekranından takip edebileceğiniz iOS/Android Home Widget desteği.
+
+---
+
+## 🛠 Teknik Mimari ve Kullanılan Teknolojiler
+
+Bu proje **Flutter** ile geliştirilmiş olup temiz mimari (Clean Architecture) prensiplerine ve durum yönetimi standartlarına uygun olarak tasarlanmıştır.
+
+- **Durum Yönetimi (State Management):** Uygulama genelinde verimli ve reaktif bir veri akışı için `Provider` kullanılmıştır (`step_provider.dart`, `water_provider.dart`, `settings_provider.dart`).
+- **Veritabanı ve Kimlik Doğrulama:** Google Firebase (Auth & Cloud Firestore).
+- **Harita ve Konum:** `flutter_map`, `latlong2`, `geolocator`. (Google Maps SDK kullanılmadığı için API anahtarı maliyeti gerektirmez, OpenStreetMap/CARTO tabanlıdır).
+- **Donanım ve Sensör Erişimi:** `pedometer` (adım sensörü), `permission_handler` (izin yönetimi).
+- **UI & Animasyonlar:** `lottie` (vektörel animasyonlar), `confetti` (kutlama efektleri), `percent_indicator` (ilerleme çubukları), `shimmer` (yükleme efektleri).
+- **Arka Plan İşlemleri:** `flutter_local_notifications`, yerel hizmetler ve ana ekran eklentileri (`home_widget`).
+- **Veri Paylaşımı:** Rotalarınızı ve adım hedeflerinizi görsel bir kart olarak sosyal medyada paylaşmanızı sağlayan `screenshot` ve `share_plus` entegrasyonu.
+
+---
 
 ## 🚀 Başlangıç ve Kurulum
 
-Bu projeyi kendi ortamınızda çalıştırmak için aşağıdaki adımları izleyin:
+Bu projeyi geliştirme ortamınızda çalıştırmak için aşağıdaki adımları izleyebilirsiniz.
 
-1. Depoyu klonlayın:
+1. **Depoyu Klonlayın:**
    ```bash
    git clone https://github.com/ismailsoylemez-dev/yuruyus_defteri.git
-   ```
-2. Proje dizinine gidin:
-   ```bash
    cd yuruyus_defteri
    ```
-3. Bağımlılıkları yükleyin:
+
+2. **Bağımlılıkları Yükleyin:**
    ```bash
    flutter pub get
    ```
-4. Firebase Kurulumu:
-   - Projenin `FIREBASE_KURULUM.md` dosyasındaki talimatları izleyerek kendi Firebase projenizi bağlayın (`google-services.json` vb.).
-5. Uygulamayı çalıştırın:
+
+3. **Firebase Yapılandırması:**
+   Uygulamanın çalışması için kendi Firebase projenizi bağlamanız gereklidir.
+   - Proje dizininde yer alan `FIREBASE_KURULUM.md` dosyasındaki talimatları takip edin.
+   - İlgili `google-services.json` (Android) ve `GoogleService-Info.plist` (iOS) dosyalarını ilgili dizinlere yerleştirin.
+
+4. **Uygulamayı Çalıştırın:**
    ```bash
    flutter run
    ```
 
+---
+
 ## 📜 Lisans
 
-Bu proje kişisel kullanım amacıyla açık kaynak olarak sunulmuştur. Katkıda bulunmak isterseniz bir PR (Pull Request) oluşturabilirsiniz.
+Bu proje, açık kaynak topluluğuna katkı sağlamak amacıyla geliştirilmiştir. Geliştirmelere destek olmak, hata bildiriminde bulunmak veya yeni özellikler eklemek için bir PR (Pull Request) oluşturabilir veya Issues sekmesini kullanabilirsiniz.
+
+*Sağlıklı ve aktif günler dileriz!*
