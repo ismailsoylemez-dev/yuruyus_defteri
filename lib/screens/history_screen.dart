@@ -227,6 +227,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
               waterMl: settings.waterEnabled
                   ? Aggregate.totalBetween(water.history, range.start, range.end)
                   : null,
+              goalPercent: _period == Period.day && goal > 0
+                  ? (total * 100 / goal).round()
+                  : null,
             ),
             const SizedBox(height: 12),
             _InsightCard(period: _period, offset: _offset, step: step),

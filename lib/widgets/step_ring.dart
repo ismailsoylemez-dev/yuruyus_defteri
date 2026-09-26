@@ -40,14 +40,20 @@ class StepRing extends StatelessWidget {
             children: [
               Icon(Icons.directions_walk, color: AppColors.accent, size: 26),
               const SizedBox(height: 6),
-              Text(
-                Metrics.thousands(steps),
-                style: TextStyle(
-                  fontSize: 46,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.text,
-                  height: 1.05,
-                  letterSpacing: -1.5,
+              SizedBox(
+                width: size * 0.7,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    Metrics.thousands(steps),
+                    style: TextStyle(
+                      fontSize: 46,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.text,
+                      height: 1.05,
+                      letterSpacing: -1.5,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 2),

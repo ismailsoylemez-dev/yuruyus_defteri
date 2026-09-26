@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../utils/metrics.dart';
 
-class FitnessRings extends StatelessWidget {
+class FitnessRings extends StatefulWidget {
   final int steps;
   final int goal;
   final int kcal;
@@ -22,78 +22,159 @@ class FitnessRings extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final stepProgress = goal <= 0 ? 0.0 : (steps / goal).clamp(0.0, 1.0);
-    // Hardcoded goals for calories and minutes for visual representation
-    // Or we could calculate them based on step goal if we want (e.g. goal * 0.04 for kcal, goal * 0.01 for minutes)
-    final kcalGoal = goal <= 0 ? 500 : (goal * 0.04).round(); 
-    final minGoal = goal <= 0 ? 30 : (goal * 0.01).round();
-    
-    final kcalProgress = (kcal / (kcalGoal > 0 ? kcalGoal : 1)).clamp(0.0, 1.0);
-    final minProgress = (minutes / (minGoal > 0 ? minGoal : 1)).clamp(0.0, 1.0);
+  State<FitnessRings> createState() => _FitnessRingsState();
+}
 
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        alignment: Alignment.center,
+class _FitnessRingsState extends State<FitnessRings> {
+  int _activeRing = 0; // 0: None, 1: Step, 2: Kcal, 3: Min
+
+  void _handleTap(Offset localPosition) {
+    final center = Offset(widget.size / 2, widget.size / 2);
+    final distance = (localPosition - center).distance;
+    
+    const stroke = 12.0;
+    const spacing = 4.0;
+    
+    final stepRadius = (widget.size - stroke) / 2;
+    final kcalRadius = stepRadius - stroke - spacing;
+    final minRadius = kcalRadius - stroke - spacing;
+
+    // Tolerance
+    const t = stroke / 2 + 6;
+
+    if ((distance - stepRadius).abs() < t) {
+      setState(() => _activeRing = 1);
+    } else if ((distance - kcalRadius).abs() < t) {
+      setState(() => _activeRing = 2);
+    } else if ((distance - minRadius).abs() < t) {
+      setState(() => _activeRing = 3);
+    }
+  }
+
+  void _handleTapUp() {
+    if (_activeRing != 0) {
+      setState(() => _activeRing = 0);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stepProgress = widget.goal <= 0 ? 0.0 : (widget.steps / widget.goal).clamp(0.0, 1.0);
+    
+    // Adjusted goals so they don't fill up too fast compared to steps
+    final kcalGoal = widget.goal <= 0 ? 500 : (widget.goal * 0.06).round(); 
+    final minGoal = widget.goal <= 0 ? 45 : (widget.goal * 0.02).round();
+    
+    final kcalProgress = (widget.kcal / (kcalGoal > 0 ? kcalGoal : 1)).clamp(0.0, 1.0);
+    final minProgress = (widget.minutes / (minGoal > 0 ? minGoal : 1)).clamp(0.0, 1.0);
+
+    Widget centerContent;
+    if (_activeRing == 1) {
+      centerContent = _buildCenterInfo(Icons.directions_walk, const Color(0xFF22C55E), '${widget.km.toStringAsFixed(2).replaceAll('.', ',')} km', 'Adım Mesafesi');
+    } else if (_activeRing == 2) {
+      centerContent = _buildCenterInfo(Icons.local_fire_department, MetricColors.kcal, '${widget.kcal}', 'Yakılan Kalori');
+    } else if (_activeRing == 3) {
+      centerContent = _buildCenterInfo(Icons.timer, MetricColors.time, '${widget.minutes}', 'Aktif Süre (dk)');
+    } else {
+      centerContent = Column(
+        key: const ValueKey('default'),
+        mainAxisSize: MainAxisSize.min,
         children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: 1.0),
-            duration: const Duration(milliseconds: 1200),
-            curve: Curves.easeOutCubic,
-            builder: (_, anim, __) => CustomPaint(
-              size: Size.square(size),
-              painter: _FitnessRingsPainter(
-                stepProgress: stepProgress * anim,
-                kcalProgress: kcalProgress * anim,
-                minProgress: minProgress * anim,
-              ),
+          Icon(Icons.directions_walk, color: AppColors.accent, size: 28),
+          const SizedBox(height: 6),
+          Text(
+            Metrics.thousands(widget.steps),
+            style: TextStyle(
+              fontSize: 42,
+              fontWeight: FontWeight.w900,
+              color: AppColors.text,
+              height: 1.05,
+              letterSpacing: -1.2,
             ),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
+          const SizedBox(height: 2),
+          Text(
+            'hedef ${Metrics.thousands(widget.goal)}',
+            style: TextStyle(
+              color: AppColors.textDim, 
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
             children: [
-              Icon(Icons.directions_walk, color: AppColors.accent, size: 28),
-              const SizedBox(height: 6),
-              Text(
-                Metrics.thousands(steps),
-                style: TextStyle(
-                  fontSize: 42,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.text,
-                  height: 1.05,
-                  letterSpacing: -1.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'hedef ${Metrics.thousands(goal)}',
-                style: TextStyle(
-                  color: AppColors.textDim, 
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const _LegendItem(color: Color(0xFF22C55E), icon: Icons.directions_walk, label: 'Adım'),
-                  const SizedBox(width: 12),
-                  _LegendItem(color: MetricColors.kcal, icon: Icons.local_fire_department, label: 'Kalori'),
-                  const SizedBox(width: 12),
-                  _LegendItem(color: MetricColors.time, icon: Icons.timer, label: 'Süre'),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${km.toStringAsFixed(2).replaceAll('.', ',')} km • $kcal kcal • $minutes dk',
-                style: TextStyle(color: AppColors.textDim, fontSize: 13, fontWeight: FontWeight.w600),
-              ),
+              const _LegendItem(color: Color(0xFF22C55E), icon: Icons.directions_walk, label: 'Adım'),
+              _LegendItem(color: MetricColors.kcal, icon: Icons.local_fire_department, label: 'Kalori'),
+              _LegendItem(color: MetricColors.time, icon: Icons.timer, label: 'Süre'),
             ],
           ),
         ],
+      );
+    }
+
+    return GestureDetector(
+      onPanDown: (details) => _handleTap(details.localPosition),
+      onPanEnd: (_) => _handleTapUp(),
+      onPanCancel: () => _handleTapUp(),
+      child: SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1.0),
+              duration: const Duration(milliseconds: 1200),
+              curve: Curves.easeOutCubic,
+              builder: (_, anim, __) => CustomPaint(
+                size: Size.square(widget.size),
+                painter: _FitnessRingsPainter(
+                  stepProgress: stepProgress * anim,
+                  kcalProgress: kcalProgress * anim,
+                  minProgress: minProgress * anim,
+                ),
+              ),
+            ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: centerContent,
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildCenterInfo(IconData icon, Color color, String val, String label) {
+    return Column(
+      key: ValueKey(label),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 36),
+        const SizedBox(height: 8),
+        Text(
+          val,
+          style: TextStyle(
+            fontSize: 42,
+            fontWeight: FontWeight.w900,
+            color: color,
+            height: 1.05,
+            letterSpacing: -1.2,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: AppColors.textDim, 
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 }

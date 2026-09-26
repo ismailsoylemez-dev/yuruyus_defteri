@@ -59,6 +59,8 @@ class SettingsScreen extends StatelessWidget {
                     value: settings.smartGoal,
                     onChanged: (v) async {
                       await settings.setSmartGoal(v);
+                      step.cloud?.saveSmartGoal(v);
+                      step.refreshAll(force: true);
                     },
                   ),
                   if (!settings.smartGoal) _GoalSlider(settings: settings, step: step),

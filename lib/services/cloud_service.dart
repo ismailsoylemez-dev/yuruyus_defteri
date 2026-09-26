@@ -15,6 +15,8 @@ class CloudSnapshot {
   final int? goal;
   final int? heightCm;
   final double? weightKg;
+  final bool? smartGoalEnabled;
+  final Set<String> unlockedBadges;
 
   /// Kilo kaydi { "2026-09-22": 92.4 } (kullanici dokumaninda).
   final Map<String, double> weightLog;
@@ -27,10 +29,12 @@ class CloudSnapshot {
     this.goal,
     this.heightCm,
     this.weightKg,
+    this.smartGoalEnabled,
+    this.unlockedBadges = const {},
     this.weightLog = const {},
   });
 
-  bool get isEmpty => history.isEmpty && hourly.isEmpty && waterHistory.isEmpty && goal == null && weightLog.isEmpty;
+  bool get isEmpty => history.isEmpty && hourly.isEmpty && waterHistory.isEmpty && goal == null && weightLog.isEmpty && unlockedBadges.isEmpty;
 }
 
 /// Firestore senkronu.
@@ -149,6 +153,8 @@ class CloudService {
         goal: (p?['goal'] as num?)?.toInt(),
         heightCm: (p?['heightCm'] as num?)?.toInt(),
         weightKg: (p?['weightKg'] as num?)?.toDouble(),
+        smartGoalEnabled: p?['smartGoalEnabled'] as bool?,
+        unlockedBadges: (p?['unlockedBadges'] as List<dynamic>?)?.map((e) => e.toString()).toSet() ?? const {},
         weightLog: _decodeWeights(p?['weightLog']),
       );
     } catch (e) {
@@ -504,5 +510,29 @@ class CloudService {
       batch.delete(doc.reference);
     }
     await batch.commit();
+  }
+  // --- Yeni Ozellikler icin Yardimci Fonksiyonlar ---
+  Future<void> saveSmartGoal(bool enabled) async {
+    if (_disposed) return;
+    try {
+      await _userDoc.set({
+        'smartGoalEnabled': enabled,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('CloudService.saveSmartGoal hatasi: $e');
+    }
+  }
+
+  Future<void> saveBadges(Set<String> badges) async {
+    if (_disposed) return;
+    try {
+      await _userDoc.set({
+        'unlockedBadges': badges.toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('CloudService.saveBadges hatasi: $e');
+    }
   }
 }

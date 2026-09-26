@@ -114,6 +114,8 @@ class _CloudGateState extends State<_CloudGate> {
           goal: snapshot.goal!,
           heightCm: snapshot.heightCm ?? prefs.heightCm,
           weightKg: snapshot.weightKg ?? prefs.weightKg,
+          smartGoalEnabled: snapshot.smartGoalEnabled,
+          unlockedBadges: snapshot.unlockedBadges,
         );
       }
       // Ayni gunde buyuk olan deger korunur; elle duzeltilen gunler haric.

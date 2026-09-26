@@ -1,6 +1,10 @@
 package com.ismail.adim_sayar
 
 import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -35,6 +39,25 @@ class WorkoutManager(
     companion object {
         private const val FILE = "workouts.json"
         private const val KEEP = 300
+
+        /** Otomatik duraklatma acik mi (varsayilan acik). */
+        const val K_AUTO_PAUSE = "auto_pause"
+        /** Bu kadar adim gelmezse kayit duraklar. */
+        private const val PAUSE_AFTER_MS = 10_000L
+        /** Devam icin adim olayi en fazla bu kadar eski olabilir (toplu teslim). */
+        private const val RESUME_FRESH_MS = 5_000L
+        private const val PAUSE_CHECK_MS = 2_000L
+
+        /** Sesli koc sikligi: 0 = her km, 5/10 = her N dakika. */
+        const val K_VOICE_EVERY = "voice_every_min"
+
+        /** Rakim: tirmanis/inis sayilmasi icin en az degisim (gurultu esigi). */
+        private const val ELEV_STEP_M = 3.0
+        /** Barometre yumusatma katsayisi. */
+        private const val ELEV_ALPHA = 0.1
+        /** Rakim profili ornekleme araligi (sn) ve ozetteki en fazla nokta. */
+        private const val ELEV_SAMPLE_SEC = 10L
+        private const val ELEV_MAX_POINTS = 120
 
         fun readAll(c: Context): JSONArray =
             try {
@@ -72,6 +95,127 @@ class WorkoutManager(
     private var lastMinuteSec = 0L
     private var lastMinuteSteps = -1
 
+    // ---- Hedef (0: yok) ----
+    private var goalM = 0
+    private var goalSec = 0
+    private var goalDone = false
+    private var goalHalfSaid = false
+
+    // ---- Otomatik duraklatma ----
+    /** Adim dedektoru bagli mi (yoksa duraklatma devre disi; gecikmeli sayac yanlis durdurur). */
+    @Volatile var stepFeedLive = false
+    private var autoPause = true
+    @Volatile var paused = false
+        private set
+    /** Kullanici duraklatti (bildirim/uygulama): adim gelince kendiliginden devam etmez. */
+    @Volatile var manualPaused = false
+        private set
+
+    fun pauseManual() {
+        if (!active) return
+        manualPaused = true
+        if (paused) { onChanged(); return }
+        paused = true
+        pauseStartElapsed = SystemClock.elapsedRealtime()
+        vibrate(longArrayOf(0, 60, 80, 60))
+        onChanged()
+    }
+
+    fun resumeManual() {
+        if (!active || !paused) return
+        val now = SystemClock.elapsedRealtime()
+        pausedTotalMs += maxOf(0L, now - pauseStartElapsed)
+        paused = false
+        manualPaused = false
+        lastStepElapsed = now
+        vibrate(longArrayOf(0, 120))
+        onChanged()
+    }
+    private var pauseStartElapsed = 0L
+    private var pausedTotalMs = 0L
+    private var lastStepElapsed = 0L
+
+    private val pauseCheck = object : Runnable {
+        override fun run() {
+            if (!active) return
+            val now = SystemClock.elapsedRealtime()
+            if (autoPause && stepFeedLive && !paused &&
+                now - startElapsed > 15_000L &&
+                now - lastStepElapsed > PAUSE_AFTER_MS
+            ) {
+                paused = true
+                // Duraklama son adimdan ~1 sn sonra baslamis sayilir.
+                pauseStartElapsed = minOf(now, lastStepElapsed + 1_000L)
+                vibrate(longArrayOf(0, 60, 80, 60))
+                onChanged()
+            }
+            handler.postDelayed(this, PAUSE_CHECK_MS)
+        }
+    }
+
+    /** StepService her adim olayinda cagirir ([eventWallMs]: olayin zamani). */
+    fun onStep(eventWallMs: Long) {
+        if (!active) return
+        val ageMs = System.currentTimeMillis() - eventWallMs
+        if (ageMs > RESUME_FRESH_MS) return
+        val now = SystemClock.elapsedRealtime()
+        val at = now - maxOf(0L, ageMs)
+        if (at > lastStepElapsed) lastStepElapsed = at
+        if (paused && !manualPaused) {
+            pausedTotalMs += maxOf(0L, at - pauseStartElapsed)
+            paused = false
+            vibrate(longArrayOf(0, 120))
+            onChanged()
+        }
+    }
+
+    /** Hareket suresi (duraklamalar haric), sn. Otomatik duraklatma kapaliysa toplam sure. */
+    fun activeSec(): Long {
+        if (startElapsed == 0L) return 0
+        val now = SystemClock.elapsedRealtime()
+        val current = if (paused) maxOf(0L, now - pauseStartElapsed) else 0L
+        return maxOf(0L, (now - startElapsed - pausedTotalMs - current) / 1000)
+    }
+
+    // ---- Sesli koc (zaman tabanli) ----
+    private var nextVoiceSec = 0L
+
+    // ---- Rakim (barometre) ----
+    private val sensorManager = ctx.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+    private var baroOn = false
+    private var elevSmooth = Double.NaN
+    private var elevBase = Double.NaN
+    private var elevRef = Double.NaN
+    private var elevGain = 0.0
+    private var elevLoss = 0.0
+    private var lastElevSampleSec = -ELEV_SAMPLE_SEC
+    private val elevSamples = mutableListOf<Double>()
+
+    private val baroListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            val p = event?.values?.firstOrNull() ?: return
+            if (p <= 0f) return
+            val alt = SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, p).toDouble()
+            if (elevSmooth.isNaN()) {
+                elevSmooth = alt
+                elevBase = alt
+                elevRef = alt
+                return
+            }
+            elevSmooth += ELEV_ALPHA * (alt - elevSmooth)
+            val d = elevSmooth - elevRef
+            if (d >= ELEV_STEP_M) {
+                elevGain += d
+                elevRef = elevSmooth
+            } else if (d <= -ELEV_STEP_M) {
+                elevLoss += -d
+                elevRef = elevSmooth
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private val handler = Handler(Looper.getMainLooper())
@@ -80,6 +224,9 @@ class WorkoutManager(
         override fun run() {
             if (!active) return
             if (interval && !intervalDone) checkPhase()
+            checkGoal()
+            checkTimedVoice()
+            sampleElevation()
             
             val currentSteps = stepsNow()
             val sec = elapsedSec()
@@ -101,9 +248,29 @@ class WorkoutManager(
         }
     }
 
-    fun start(intervalMode: Boolean, roundCount: Int, fastS: Int, slowS: Int) {
+    fun start(
+        intervalMode: Boolean,
+        roundCount: Int,
+        fastS: Int,
+        slowS: Int,
+        goalMeters: Int = 0,
+        goalSeconds: Int = 0
+    ) {
         if (active) return
         active = true
+        goalM = goalMeters.coerceIn(0, 100_000)
+        goalSec = goalSeconds.coerceIn(0, 6 * 3600)
+        goalDone = false
+        goalHalfSaid = false
+        nextVoiceSec = voiceEveryMin() * 60L
+        startBarometer()
+        autoPause = StepService.prefs(ctx).getBoolean(K_AUTO_PAUSE, true)
+        paused = false
+        manualPaused = false
+        pausedTotalMs = 0L
+        lastStepElapsed = startElapsed
+        handler.removeCallbacks(pauseCheck)
+        handler.postDelayed(pauseCheck, PAUSE_CHECK_MS)
         startWall = System.currentTimeMillis()
         startElapsed = SystemClock.elapsedRealtime()
         startSteps = stepsNow()
@@ -134,12 +301,17 @@ class WorkoutManager(
     /** Biter, ozeti kaydeder ve dondurur. */
     fun stop(): JSONObject? {
         if (!active) return null
+        // Duraklamadayken bitirilirse duraklama suresi dusulur.
+        val finalActive = activeSec()
         active = false
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(pauseCheck)
+        stopBarometer()
         val summary = summaryJson()
+        paused = false
         save(summary)
         val km = String.format(Locale("tr", "TR"), "%.2f", distanceM / 1000.0)
-        speak("Yürüyüş bitti. $km kilometre, ${spokenDuration(elapsedSec())}.")
+        speak("Yürüyüş bitti. $km kilometre, ${spokenDuration(finalActive)}.")
         vibrate(longArrayOf(0, 200, 120, 200))
         // Son anons bitince TTS kapanir.
         handler.postDelayed({ shutdownTts() }, 8_000L)
@@ -149,6 +321,7 @@ class WorkoutManager(
 
     fun shutdown() {
         if (active) stop()
+        stopBarometer()
         handler.removeCallbacks(tick)
         shutdownTts()
     }
@@ -156,15 +329,21 @@ class WorkoutManager(
     /** RouteTracker kabul edilen her noktada cagirir. */
     fun onDistance(m: Double) {
         if (!active || m <= 0) return
+        // Duraklamadayken GPS kaymasi mesafeye eklenmez.
+        if (paused) return
         distanceM += m
         val km = (distanceM / 1000.0).toInt()
         if (km > splits.size) {
-            val sec = elapsedSec()
+            val sec = activeSec()
             val prev = splits.lastOrNull() ?: 0L
             splits.add(sec)
             vibrate(longArrayOf(0, 300))
-            speak("$km kilometre. Süre ${spokenDuration(sec)}. " +
-                "Son kilometre ${spokenDuration(sec - prev)}.")
+            // Zaman tabanli kocta km anonsu yapilmaz (yalniz titresim).
+            if (voiceEveryMin() == 0) {
+                speak("$km kilometre tamamlandı. Süre ${spokenDuration(sec)}. " +
+                    "Son kilometre ${spokenDuration(sec - prev)}. " +
+                    "Ortalama tempo ${spokenPace(sec.toDouble(), distanceM)}.")
+            }
             onChanged()
         }
     }
@@ -180,6 +359,10 @@ class WorkoutManager(
         if (!active) return o
         o.put("start", startWall)
         o.put("elapsedSec", elapsedSec())
+        o.put("movingSec", activeSec())
+        o.put("paused", paused)
+        o.put("manualPaused", manualPaused)
+        o.put("autoPause", autoPause && stepFeedLive)
         o.put("distanceM", distanceM)
         val now = stepsNow()
         o.put("steps", if (startSteps >= 0 && now >= startSteps) now - startSteps else 0)
@@ -189,6 +372,13 @@ class WorkoutManager(
         o.put("runMin", runMin)
         o.put("splits", JSONArray(splits))
         o.put("interval", interval)
+        o.put("goalM", goalM)
+        o.put("goalSec", goalSec)
+        o.put("goalDone", goalDone)
+        if (baroOn) {
+            o.put("elevGain", Math.round(elevGain * 10) / 10.0)
+            o.put("elevLoss", Math.round(elevLoss * 10) / 10.0)
+        }
         if (interval) {
             o.put("rounds", rounds)
             o.put("round", round)
@@ -204,13 +394,97 @@ class WorkoutManager(
     fun notificationLine(): String? {
         if (!active) return null
         val tr = Locale("tr", "TR")
-        val base = String.format(tr, "🏃  Yürüyüş · %.2f km · %s", distanceM / 1000.0, clock(elapsedSec()))
+        val base = String.format(tr, "%s  Yürüyüş · %.2f km · %s",
+            if (paused) "⏸" else "🏃", distanceM / 1000.0, clock(activeSec())) +
+            (if (paused) " · duraklatıldı" else "")
         if (!interval || intervalDone) return base
         val left = maxOf(0L, (phaseEndsAt - SystemClock.elapsedRealtime()) / 1000)
         return "$base · ${if (fastPhase) "HIZLI" else "yavaş"} ${clock(left)} (tur $round/$rounds)"
     }
 
     // ------------------------------------------------------------------
+
+    private fun voiceEveryMin(): Int =
+        StepService.prefs(ctx).getInt(K_VOICE_EVERY, 0).let { if (it == 5 || it == 10) it else 0 }
+
+    /** "6 dakika 30 saniye" (km basina); 200 m altinda anlamsiz. */
+    private fun spokenPace(sec: Double, meters: Double): String {
+        if (meters < 200) return "henüz hesaplanmadı"
+        return spokenDuration((sec / (meters / 1000.0)).toLong())
+    }
+
+    /** Her 5/10 dakikada bir: sure, mesafe, ortalama tempo. */
+    private fun checkTimedVoice() {
+        val every = voiceEveryMin()
+        if (every == 0 || paused) return
+        val sec = activeSec()
+        if (nextVoiceSec <= 0L) nextVoiceSec = every * 60L
+        if (sec < nextVoiceSec) return
+        nextVoiceSec = (sec / (every * 60L) + 1) * every * 60L
+        val km = String.format(Locale("tr", "TR"), "%.2f", distanceM / 1000.0)
+        speak("${spokenDuration(sec)} oldu. Mesafe $km kilometre. " +
+            "Ortalama tempo ${spokenPace(sec.toDouble(), distanceM)}.")
+    }
+
+    private fun startBarometer() {
+        elevSmooth = Double.NaN
+        elevBase = Double.NaN
+        elevRef = Double.NaN
+        elevGain = 0.0
+        elevLoss = 0.0
+        lastElevSampleSec = -ELEV_SAMPLE_SEC
+        elevSamples.clear()
+        val sm = sensorManager ?: return
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_PRESSURE) ?: return
+        baroOn = try {
+            sm.registerListener(baroListener, sensor, SensorManager.SENSOR_DELAY_NORMAL, 5_000_000)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun stopBarometer() {
+        if (!baroOn) return
+        try { sensorManager?.unregisterListener(baroListener) } catch (e: Exception) {}
+        baroOn = false
+    }
+
+    private fun sampleElevation() {
+        if (!baroOn || elevSmooth.isNaN()) return
+        val sec = elapsedSec()
+        if (sec - lastElevSampleSec < ELEV_SAMPLE_SEC) return
+        lastElevSampleSec = sec
+        elevSamples.add(Math.round((elevSmooth - elevBase) * 10) / 10.0)
+    }
+
+    /** Esit aralikli en fazla [max] nokta. */
+    private fun downsample(src: List<Double>, max: Int): List<Double> {
+        if (src.size <= max) return src.toList()
+        val step = (src.size - 1).toDouble() / (max - 1)
+        return List(max) { i -> src[Math.round(i * step).toInt()] }
+    }
+
+    /** Mesafe/sure hedefi: yarida ve dolunca sesli bildirim. */
+    private fun checkGoal() {
+        if (goalDone || (goalM <= 0 && goalSec <= 0)) return
+        val progress = when {
+            goalM > 0 -> distanceM / goalM
+            else -> activeSec().toDouble() / goalSec
+        }
+        if (!goalHalfSaid && progress >= 0.5 && progress < 1.0) {
+            goalHalfSaid = true
+            vibrate(longArrayOf(0, 150, 100, 150))
+            speak("Hedefin yarısı tamam. Böyle devam!")
+        }
+        val reached = (goalM > 0 && distanceM >= goalM) ||
+            (goalSec > 0 && activeSec() >= goalSec)
+        if (!reached) return
+        goalDone = true
+        vibrate(longArrayOf(0, 300, 150, 300, 150, 500))
+        val km = String.format(Locale("tr", "TR"), "%.2f", distanceM / 1000.0)
+        speak("Tebrikler, hedefe ulaştın. $km kilometre, ${spokenDuration(activeSec())}.")
+        onChanged()
+    }
 
     private fun checkPhase() {
         val now = SystemClock.elapsedRealtime()
@@ -237,7 +511,9 @@ class WorkoutManager(
         val o = JSONObject()
         o.put("start", startWall)
         o.put("end", System.currentTimeMillis())
-        o.put("durationSec", elapsedSec())
+        // durationSec: hareket suresi (tempo bundan); totalSec: duraklamalar dahil.
+        o.put("durationSec", activeSec())
+        o.put("totalSec", elapsedSec())
         o.put("distanceM", distanceM)
         val now = stepsNow()
         o.put("steps", if (startSteps >= 0 && now >= startSteps) now - startSteps else 0)
@@ -247,6 +523,14 @@ class WorkoutManager(
         o.put("runMin", runMin)
         o.put("splits", JSONArray(splits))
         o.put("interval", interval)
+        if (goalM > 0) o.put("goalM", goalM)
+        if (goalSec > 0) o.put("goalSec", goalSec)
+        if (goalM > 0 || goalSec > 0) o.put("goalDone", goalDone)
+        if (elevSamples.size >= 2) {
+            o.put("elevGain", Math.round(elevGain * 10) / 10.0)
+            o.put("elevLoss", Math.round(elevLoss * 10) / 10.0)
+            o.put("elev", JSONArray(downsample(elevSamples, ELEV_MAX_POINTS)))
+        }
         if (interval) {
             o.put("rounds", rounds)
             o.put("roundsDone", if (intervalDone) rounds else round - (if (fastPhase) 1 else 0))

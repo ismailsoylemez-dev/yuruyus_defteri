@@ -22,6 +22,7 @@ import '../widgets/weather_suggestion_card.dart';
 import '../utils/root_nav.dart';
 import 'water_screen.dart';
 import 'weight_screen.dart';
+import 'insights_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -70,6 +71,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (_lastBadgeId != null && step.lastBadgeId != _lastBadgeId && step.lastBadgeId.isNotEmpty) {
       _confettiController.play();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showBadgeDialog(context, step.lastBadgeId);
+      });
     }
     _lastBadgeId = step.lastBadgeId;
 
@@ -79,7 +83,8 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Bugün'),
         actions: [
-          // Kilo takibi
+          const Center(child: _VisualSummaryChip()),
+          const SizedBox(width: 4),
           IconButton(
             tooltip: 'Kilo takibi',
             onPressed: () => Navigator.of(context).push(
@@ -175,6 +180,32 @@ class _HomeScreenState extends State<HomeScreen> {
     ],
     );
   }
+
+  void _showBadgeDialog(BuildContext context, String badgeId) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.emoji_events, color: Colors.amber, size: 32),
+              SizedBox(width: 8),
+              Text('Yeni Rozet!'),
+            ],
+          ),
+          content: const Text(
+            'Tebrikler, yeni bir rozet kazandınız! Daha fazlasını görmek için Rozetler sayfasına göz atın.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Tamam'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 /// Haftalik rapor: halkalar her zaman, gun detaylari "Detaylari goster"
@@ -267,7 +298,7 @@ class _TodayCard extends StatelessWidget {
   final int steps;
   final int goal;
 
-  /// null: su takibi kapali, su kutusu cikmaz (kalan 3 kutu esit yayilir).
+  /// null: su takibi kapali, su cipi cikmaz.
   final int? waterMl;
 
   /// Normal / tempolu / kosu kirilimi; km, kcal ve sure bunun toplamidir.
@@ -286,21 +317,67 @@ class _TodayCard extends StatelessWidget {
     final minutes = breakdown.minutes;
     final kcal = breakdown.kcal;
     final percent = goal <= 0 ? 0 : ((steps / goal) * 100).round();
+    final left = goal - steps;
     final now = DateTime.now();
 
+    final chips = <Widget>[
+      _MetricChip(
+        icon: Icons.route_rounded,
+        color: MetricColors.km,
+        value: '${km.toStringAsFixed(2).replaceAll('.', ',')} km',
+        label: 'mesafe',
+      ),
+      _MetricChip(
+        icon: Icons.local_fire_department_rounded,
+        color: MetricColors.kcal,
+        value: '${kcal.toStringAsFixed(0)} kcal',
+        label: 'kalori',
+      ),
+      if (waterMl != null)
+        _MetricChip(
+          icon: Icons.water_drop_rounded,
+          color: MetricColors.water,
+          value: '${(waterMl! / 1000).toStringAsFixed(1).replaceAll('.', ',')} L',
+          label: 'su',
+        ),
+      _MetricChip(
+        icon: left <= 0 ? Icons.verified_rounded : Icons.flag_rounded,
+        color: left <= 0 ? AppColors.best : AppColors.accent,
+        value: goal <= 0
+            ? '—'
+            : left <= 0
+                ? 'Tamam!'
+                : Metrics.thousands(left),
+        label: goal <= 0 ? 'hedef kapalı' : (left <= 0 ? 'hedef tuttu' : 'adım kaldı'),
+      ),
+    ];
+
+    // 2'li satirlar; tek kalan son cip tam genislik.
+    final rows = <Widget>[];
+    for (var i = 0; i < chips.length; i += 2) {
+      if (i > 0) rows.add(const SizedBox(height: 8));
+      rows.add(Row(
+        children: [
+          Expanded(child: chips[i]),
+          if (i + 1 < chips.length) ...[
+            const SizedBox(width: 8),
+            Expanded(child: chips[i + 1]),
+          ],
+        ],
+      ));
+    }
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [AppColors.pick(const Color(0xFF16261D), const Color(0xFFE6F6EC)), AppColors.surface],
         ),
-        borderRadius: BorderRadius.circular(20),
-        // Ana kart: yesil ince kenarla diger kartlardan one cikar.
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: AppColors.accent
-              .withValues(alpha: AppColors.isLight ? 0.35 : 0.24),
+          color: AppColors.accent.withValues(alpha: AppColors.isLight ? 0.35 : 0.28),
           width: 1.2,
         ),
         boxShadow: AppColors.cardShadow,
@@ -310,31 +387,40 @@ class _TodayCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.today, size: 16, color: AppColors.accent),
-              const SizedBox(width: 7),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(Icons.today_rounded, size: 16, color: AppColors.accent),
+              ),
+              const SizedBox(width: 8),
               Text(
                 'Bugün',
                 style: TextStyle(
                   color: AppColors.text,
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
               const Spacer(),
-              // Tarih kartin sag ustunde sade bir etiket: 21.09.2026 Pazartesi
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '${Metrics.numericDate(now)} ${Metrics.longLabel(now)}',
-                  style: TextStyle(
-                    color: AppColors.textDim,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${Metrics.numericDate(now)} ${Metrics.longLabel(now)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppColors.textDim,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -344,85 +430,90 @@ class _TodayCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    Metrics.thousands(steps),
-                    style: TextStyle(
-                      color: AppColors.accent,
-                      fontSize: 34,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -1.2,
-                      height: 1,
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          Metrics.thousands(steps),
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: AppColors.accent,
+                            fontSize: 36,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -1.2,
+                            height: 1,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  Text(
-                    'adım',
-                    style: TextStyle(color: AppColors.textDim, fontSize: 12),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        'adım',
+                        style: TextStyle(
+                          color: AppColors.textDim,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const Spacer(),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              const SizedBox(width: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(Icons.timer_rounded, size: 18, color: MetricColors.time),
+                  const SizedBox(width: 4),
                   Text(
                     Metrics.duration(minutes),
                     style: TextStyle(
                       color: AppColors.text,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      height: 1.1,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
                     ),
-                  ),
-                  Text(
-                    'yürünen süre',
-                    style: TextStyle(color: AppColors.textDim, fontSize: 12),
                   ),
                 ],
               ),
             ],
           ),
-          const Divider(height: 26),
-          Row(
-            children: [
-              Expanded(
-                child: _MiniStat(
-                  icon: Icons.straighten,
-                  color: MetricColors.km,
-                  value: '${km.toStringAsFixed(2)} km',
-                  label: 'mesafe',
-                ),
-              ),
-              Expanded(
-                child: _MiniStat(
-                  icon: Icons.local_fire_department_outlined,
-                  color: MetricColors.kcal,
-                  value: '${kcal.toStringAsFixed(0)} kcal',
-                  label: 'kalori',
-                ),
-              ),
-              if (waterMl != null)
+          if (goal > 0) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
                 Expanded(
-                  child: _MiniStat(
-                    icon: Icons.water_drop_outlined,
-                    color: MetricColors.water,
-                    value: '${(waterMl! / 1000).toStringAsFixed(1).replaceAll('.', ',')} L',
-                    label: 'su',
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: (steps / goal).clamp(0.0, 1.0),
+                      minHeight: 9,
+                      backgroundColor: AppColors.surfaceAlt,
+                      color: percent >= 100 ? AppColors.best : AppColors.accent,
+                    ),
                   ),
                 ),
-              Expanded(
-                child: _MiniStat(
-                  icon: Icons.flag_outlined,
-                  color: AppColors.accent,
-                  value: '%$percent',
-                  label: 'hedefin',
+                const SizedBox(width: 10),
+                Text(
+                  '%$percent',
+                  style: TextStyle(
+                    color: percent >= 100 ? AppColors.best : AppColors.accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          ...rows,
+          const SizedBox(height: 10),
           // Dokununca normal / tempolu / kosu dokumu acilir.
           InkWell(
             borderRadius: BorderRadius.circular(8),
@@ -437,6 +528,121 @@ class _TodayCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Bugun kartindaki renkli olcu cipi: ikon rozeti + deger + etiket.
+class _MetricChip extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String value;
+  final String label;
+
+  const _MetricChip({
+    required this.icon,
+    required this.color,
+    required this.value,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: AppColors.isLight ? 0.09 : 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Sag ustteki "Gorsel Ozet" girisi: paylasilabilir haftalik/aylik kartlar.
+class _VisualSummaryChip extends StatelessWidget {
+  const _VisualSummaryChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Görsel Özet (haftalık / aylık paylaşım kartı)',
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF14B8A6), Color(0xFF8B5CF6), Color(0xFFF59E0B)],
+            ),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const InsightsScreen(weekly: true)),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.auto_awesome_rounded, size: 15, color: Colors.white),
+                  SizedBox(width: 5),
+                  Text(
+                    'Özet',
+                    style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -699,56 +905,6 @@ class _WaterButton extends StatelessWidget {
   }
 }
 
-
-class _MiniStat extends StatelessWidget {
-  final IconData? icon;
-  final Color? _color;
-  final String value;
-  final String label;
-  const _MiniStat({
-    this.icon,
-    Color? color,
-    required this.value,
-    required this.label,
-  }) : _color = color;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _color ?? AppColors.accent;
-    return Column(
-      children: [
-        if (icon != null) ...[
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 17, color: color),
-          ),
-          const SizedBox(height: 5),
-        ],
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            value,
-            style: TextStyle(
-              color: AppColors.text,
-              fontSize: 15.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(color: AppColors.textDim, fontSize: 11.5),
-        ),
-      ],
-    );
-  }
-}
 
 class _StatusChip extends StatelessWidget {
   final String text;

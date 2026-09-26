@@ -24,6 +24,8 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
     with WidgetsBindingObserver {
   RouteStatus _status = const RouteStatus();
   bool _busy = false;
+  int _voiceEvery = 0;
+  bool _autoPause = true;
 
   @override
   void initState() {
@@ -48,15 +50,21 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
 
   Future<void> _reload() async {
     final s = await RouteService.status();
+    final v = await RouteService.voiceEvery();
+    final ap = await RouteService.autoPause();
     if (!mounted) return;
-    setState(() => _status = s);
+    setState(() {
+      _status = s;
+      _voiceEvery = v;
+      _autoPause = ap;
+    });
   }
 
   Future<void> _toggle(bool on) async {
     setState(() => _busy = true);
     try {
       if (on) {
-        final ok = await RouteService.requestPermissions();
+        final ok = await RouteService.requestPermissions(background: true);
         if (!ok) {
           final denied = await Permission.locationWhenInUse.isPermanentlyDenied;
           if (mounted) {
@@ -124,7 +132,7 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Rota kaydı',
+                    'Otomatik rota',
                     style: TextStyle(
                       color: AppColors.text,
                       fontSize: 14,
@@ -134,7 +142,9 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
                   Text(
                     s.active
                         ? 'Şu an kaydediliyor'
-                        : 'GPS yalnızca yürürken açılır',
+                        : s.enabled
+                            ? '2 dk kesintisiz yürüyünce GPS açılır'
+                            : 'Kapalı · GPS yalnızca antrenmanda açılır',
                     style: TextStyle(color: AppColors.textDim, fontSize: 11.5),
                   ),
                 ],
@@ -148,26 +158,100 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
         ),
         const SizedBox(height: 10),
         Text(
-          'Bu ayar açıkken arka planda yürüyüşünüz haritaya kaydedilir. Kapalıysa harita kaydı tamamen durur (adım sayar çalışmaya devam eder) ve haritada yalnızca geçmiş yürüyüşleriniz görünür.',
+          'Kapalıyken GPS yalnızca "Antrenmanı Başlat" ile açılır; en az pil tüketimi budur. '
+          'Açarsan antrenman başlatmadan yürüdüğün yerler de haritaya işlenir: GPS 2 dakika '
+          'kesintisiz yürüyünce açılır, 90 saniye durunca kapanır. Uygulama kapalıyken '
+          'çalışması için konum izninin "Her zaman izin ver" olması gerekir ve pil tüketimi artar.',
           style: TextStyle(
             color: AppColors.textDim,
             fontSize: 12.5,
             height: 1.4,
           ),
         ),
-        const SizedBox(height: 12),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Icon(Icons.motion_photos_auto_outlined, size: 18, color: AppColors.accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Otomatik duraklatma',
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    'Antrenmanda 10 sn adım atılmazsa süre ve mesafe durur, ilk adımda devam eder. '
+                    'Bisiklet/bebek arabası gibi adımsız hareketlerde kapat.',
+                    style: TextStyle(color: AppColors.textDim, fontSize: 11.5),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: _autoPause,
+              onChanged: (v) {
+                setState(() => _autoPause = v);
+                RouteService.setAutoPause(v);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Icon(Icons.record_voice_over_outlined, size: 18, color: AppColors.accent),
+            const SizedBox(width: 8),
+            Text(
+              'Sesli koç',
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Antrenmanda süre, mesafe ve ortalama tempoyu ne sıklıkla söylesin?',
+          style: TextStyle(color: AppColors.textDim, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Her km')),
+              ButtonSegment(value: 5, label: Text('5 dk')),
+              ButtonSegment(value: 10, label: Text('10 dk')),
+            ],
+            selected: {_voiceEvery},
+            showSelectedIcon: false,
+            onSelectionChanged: (v) {
+              setState(() => _voiceEvery = v.first);
+              RouteService.setVoiceEvery(v.first);
+            },
+          ),
+        ),
+        const SizedBox(height: 14),
         _StatusLine(
           ok: s.fine,
           text: s.fine ? 'Konum izni verildi' : 'Konum izni yok',
         ),
         const SizedBox(height: 6),
-        _StatusLine(
-          ok: s.background,
-          text: s.background
-              ? 'Uygulama kapalıyken de kayıt yapılır'
-              : 'Kapalıyken kayıt için konumu "Her zaman izin ver" yap',
-        ),
+        if (s.enabled)
+          _StatusLine(
+            ok: s.background,
+            text: s.background
+                ? 'Uygulama kapalıyken de otomatik rota çalışır'
+                : 'Kapalıyken otomatik rota için konumu "Her zaman izin ver" yap',
+          ),
         const SizedBox(height: 6),
         _StatusLine(
           ok: s.serviceRunning,
@@ -180,7 +264,7 @@ class _RouteSettingsPanelState extends State<RouteSettingsPanel>
           spacing: 8,
           runSpacing: 4,
           children: [
-            if (!s.background)
+            if (s.enabled && !s.background)
               OutlinedButton.icon(
                 onPressed: RouteService.openAppSettings,
                 icon: const Icon(Icons.location_on_outlined, size: 18),

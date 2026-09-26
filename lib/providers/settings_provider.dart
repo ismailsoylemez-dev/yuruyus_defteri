@@ -25,6 +25,17 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Set<String> get unlockedBadges => _prefs.unlockedBadges;
+
+  Future<void> addBadge(String badge) async {
+    final badges = _prefs.unlockedBadges;
+    if (!badges.contains(badge)) {
+      badges.add(badge);
+      await _prefs.setUnlockedBadges(badges);
+      notifyListeners();
+    }
+  }
+
   Future<void> setHeight(int v) async {
     await _prefs.setHeight(v.clamp(120, 230));
     notifyListeners();
@@ -175,10 +186,18 @@ class SettingsProvider extends ChangeNotifier {
     required int goal,
     required int heightCm,
     required double weightKg,
+    bool? smartGoalEnabled,
+    Set<String>? unlockedBadges,
   }) async {
     await _prefs.setGoal(goal.clamp(1000, 40000));
     await _prefs.setHeight(heightCm.clamp(120, 230));
     await _prefs.setWeight(weightKg.clamp(30.0, 250.0));
+    if (smartGoalEnabled != null) {
+      await _prefs.setSmartGoal(smartGoalEnabled);
+    }
+    if (unlockedBadges != null && unlockedBadges.isNotEmpty) {
+      await _prefs.setUnlockedBadges(unlockedBadges);
+    }
     notifyListeners();
   }
 }

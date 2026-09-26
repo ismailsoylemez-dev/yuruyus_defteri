@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -23,6 +24,11 @@ class RouteSegment {
   final int startSteps;
   final int endSteps;
 
+  /// Nokta basina zaman (ms) ve gunluk adim sayaci (cihazdaki kayitta; bulut
+  /// kaydinda bos). Harita tempo renklendirmesi icin.
+  final List<int> times;
+  final List<int> stepsAt;
+
   const RouteSegment({
     required this.day,
     required this.points,
@@ -30,6 +36,8 @@ class RouteSegment {
     required this.endMs,
     this.startSteps = -1,
     this.endSteps = -1,
+    this.times = const [],
+    this.stepsAt = const [],
   });
 
   int get steps =>
@@ -84,6 +92,12 @@ class RouteStatus {
   final int accepted;
   final int rejected;
 
+  /// Native tarafin GPS'in neden acik/kapali oldugu aciklamasi.
+  final String reason;
+
+  /// Otomatik rota tetigi: son 2 dk'daki adim.
+  final int windowSteps;
+
   const RouteStatus({
     this.enabled = false,
     this.fine = false,
@@ -96,16 +110,19 @@ class RouteStatus {
     this.lastFix,
     this.accepted = 0,
     this.rejected = 0,
+    this.reason = '',
+    this.windowSteps = 0,
   });
 
   /// Kayit icin gereken dogruluk siniri (RouteTracker.MAX_ACCURACY_M).
   static const maxAccuracyM = 50.0;
 
-  /// Kayit acik ve konum izni var.
-  bool get ready => enabled && fine;
+  /// [enabled]: otomatik rota (istege bagli). Antrenman kaydi yalnizca
+  /// konum izni ister.
+  bool get ready => fine;
 
-  /// Uygulama kapaliyken de kayit yapabilir ("Her zaman izin ver").
-  bool get fullyReady => ready && background;
+  /// Otomatik rota aciksa arka plan izni de var mi (kapaliysa her zaman true).
+  bool get fullyReady => fine && (!enabled || background);
 }
 
 /// Rota kaydinin Flutter tarafi: native RouteTracker (StepService icinde)
@@ -119,7 +136,9 @@ class RouteService {
 
   static const _channel = MethodChannel('adim_sayar/service');
   static const _syncKey = 'route_sync_json';
-  static const _syncDays = 30;
+  /// Buluta yedeklenen gecmis: cihazdaki tum rota gecmisi (RouteTracker
+  /// KEEP_DAYS ile ayni). Isi haritasi yeni telefonda da buradan kurulur.
+  static const _syncDays = 800;
 
   static bool get supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -152,6 +171,8 @@ class RouteService {
             : null,
         accepted: (m['accepted'] as num?)?.toInt() ?? 0,
         rejected: (m['rejected'] as num?)?.toInt() ?? 0,
+        reason: m['reason']?.toString() ?? '',
+        windowSteps: (m['windowSteps'] as num?)?.toInt() ?? 0,
       );
     } catch (e) {
       debugPrint('Rota durumu okunamadi: $e');
@@ -159,16 +180,19 @@ class RouteService {
     }
   }
 
-  /// Once "Uygulamayi kullanirken", ardindan "Her zaman" izni istenir.
-  /// Android 11+ ikincisi icin sistem uygulamanin konum ayarini acar.
+  /// "Uygulamayi kullanirken" izni istenir (antrenman icin yeterli).
+  /// [background]: otomatik rota icin ardindan "Her zaman" izni de istenir;
+  /// Android 11+ bunun icin uygulamanin konum ayarini acar.
   /// Donus: hassas konum izni verildi mi.
-  static Future<bool> requestPermissions() async {
+  static Future<bool> requestPermissions({bool background = false}) async {
     if (!supported) return false;
     try {
       final fg = await Permission.locationWhenInUse.request();
       if (!fg.isGranted) return false;
-      final bg = await Permission.locationAlways.status;
-      if (!bg.isGranted) await Permission.locationAlways.request();
+      if (background) {
+        final bg = await Permission.locationAlways.status;
+        if (!bg.isGranted) await Permission.locationAlways.request();
+      }
       return true;
     } catch (e) {
       debugPrint('Konum izni istenemedi: $e');
@@ -198,6 +222,94 @@ class RouteService {
     if (!supported) return;
     try {
       await _channel.invokeMethod<bool>('setVoiceMuted', {'muted': muted});
+    } catch (_) {}
+  }
+
+  /// Kisisel isi haritasi (cihazdaki tum rota gecmisi). [privacyM] > 0 ise
+  /// en sik baslanan/bitirilen yerin (ev) cevresi cizilmez.
+  static Future<HeatmapData?> heatmap({double privacyM = 200, int? year}) async {
+    if (!supported) return null;
+    try {
+      if (year != null) {
+        // Cihazda olmayan (yeni telefon) gunler once buluttan indirilir.
+        await restoreFromCloud(DateTime(year, 1, 1), DateTime(year, 12, 31));
+      }
+      final raw = await _channel.invokeMethod<String>('heatmap', {
+        'cellM': 15.0,
+        'privacyM': privacyM,
+        if (year != null) 'from': '$year-01-01',
+        if (year != null) 'to': '$year-12-31',
+      });
+      if (raw == null) return null;
+      return HeatmapData.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('Isi haritasi hesaplanamadi: $e');
+      return null;
+    }
+  }
+
+  /// Buluttaki rota gunlerinden cihazda olmayanlari yerel dosyaya yazar.
+  /// Donus: indirilen gun sayisi.
+  static Future<int> restoreFromCloud(DateTime from, DateTime to) async {
+    if (!supported || _col == null) return 0;
+    try {
+      final local = await _loadLocal(from, to, 1000);
+      final cloud = await _loadCloud(from, to).timeout(const Duration(seconds: 15));
+      var n = 0;
+      for (final e in cloud.entries) {
+        if (local.containsKey(e.key)) continue;
+        final b = StringBuffer();
+        for (var si = 0; si < e.value.length; si++) {
+          final seg = e.value[si];
+          final pts = seg.points;
+          for (var i = 0; i < pts.length; i++) {
+            final t = pts.length == 1
+                ? seg.startMs
+                : seg.startMs + ((seg.endMs - seg.startMs) * i ~/ (pts.length - 1));
+            b.writeln('$si,$t,${pts[i].latitude.toStringAsFixed(6)},${pts[i].longitude.toStringAsFixed(6)}');
+          }
+        }
+        final ok = await _channel.invokeMethod<bool>('importRoute', {'day': e.key, 'csv': b.toString()});
+        if (ok == true) n++;
+      }
+      return n;
+    } catch (e) {
+      debugPrint('Buluttan rota indirilemedi: $e');
+      return 0;
+    }
+  }
+
+  /// Antrenmanda otomatik duraklatma (varsayilan acik).
+  static Future<bool> autoPause() async {
+    if (!supported) return true;
+    try {
+      return await _channel.invokeMethod<bool>('getAutoPause') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> setAutoPause(bool on) async {
+    if (!supported) return;
+    try {
+      await _channel.invokeMethod<bool>('setAutoPause', {'on': on});
+    } catch (_) {}
+  }
+
+  /// Sesli koc sikligi: 0 = her km, 5 / 10 = her N dakika.
+  static Future<int> voiceEvery() async {
+    if (!supported) return 0;
+    try {
+      return await _channel.invokeMethod<int>('getVoiceEvery') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<void> setVoiceEvery(int minutes) async {
+    if (!supported) return;
+    try {
+      await _channel.invokeMethod<bool>('setVoiceEvery', {'minutes': minutes});
     } catch (_) {}
   }
 
@@ -296,10 +408,32 @@ class RouteService {
   static Future<void> clearCloud() async {
     _cloudCache.clear();
     _cloudRangesFetched.clear();
+    _pulledThisSession = false;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_syncKey);
+      await prefs.remove(_kCloudCache);
+      await prefs.remove(_kSent);
     } catch (_) {}
+    final wcol = _wCol;
+    if (wcol != null) {
+      for (final c in [wcol, wcol.parent!.collection('workouts_meta')]) {
+        try {
+          while (true) {
+            final snap = await c.limit(400).get();
+            if (snap.docs.isEmpty) break;
+            final batch = FirebaseFirestore.instance.batch();
+            for (final d in snap.docs) {
+              batch.delete(d.reference);
+            }
+            await batch.commit();
+            if (snap.docs.length < 400) break;
+          }
+        } catch (e) {
+          debugPrint('Buluttaki antrenmanlar silinemedi: $e');
+        }
+      }
+    }
     final col = _col;
     if (col == null) return;
     try {
@@ -390,6 +524,8 @@ class RouteService {
               endMs: segs[s]!.last[0].toInt(),
               startSteps: segs[s]!.first[3].toInt(),
               endSteps: segs[s]!.last[3].toInt(),
+              times: [for (final p in segs[s]!) p[0].toInt()],
+              stepsAt: [for (final p in segs[s]!) p[3].toInt()],
             ),
         ];
       });
@@ -485,20 +621,40 @@ class RouteService {
       final from = Metrics.addDays(today, -(_syncDays - 1));
       final local = await _loadLocal(from, today, 6);
       var changed = false;
+      // Tek batch: cevrimdisiyken commit yerel kalici kuyruga girer ve
+      // baglanti gelince gonderilir; gun gun beklenip takilmaz.
+      // Firestore batch en fazla 500 islem: 400'erlik parcalar.
+      final batches = <WriteBatch>[FirebaseFirestore.instance.batch()];
+      var inBatch = 0;
+      final pending = <String, String>{};
       for (final e in local.entries) {
         final segs = e.value.where((s) => s.points.length >= 2).toList();
         if (segs.isEmpty) continue;
         final count = segs.fold<int>(0, (a, s) => a + s.points.length);
         final sig = '${segs.length}_${count}_${segs.last.endMs}';
         if (sent[e.key] == sig) continue;
-        await col.doc(e.key).set({
+        if (inBatch >= 400) {
+          batches.add(FirebaseFirestore.instance.batch());
+          inBatch = 0;
+        }
+        inBatch++;
+        batches.last.set(col.doc(e.key), {
           'day': e.key,
           'segs': [for (final s in segs) encodePolyline(s.points)],
           'times': [for (final s in segs) ...[s.startMs, s.endMs]],
           'updatedAt': FieldValue.serverTimestamp(),
         });
         _cloudCache[e.key] = segs;
-        sent[e.key] = sig;
+        pending[e.key] = sig;
+      }
+      if (pending.isNotEmpty) {
+        try {
+          await Future.wait([for (final b in batches) b.commit()])
+              .timeout(const Duration(seconds: 30));
+        } on TimeoutException {
+          debugPrint('Rota yedegi kuyrukta (cevrimdisi).');
+        }
+        sent.addAll(pending);
         changed = true;
       }
       if (changed) {
@@ -562,6 +718,8 @@ class RouteService {
     int rounds = 5,
     int fastSec = 180,
     int slowSec = 180,
+    int goalM = 0,
+    int goalSec = 0,
   }) async {
     if (!supported) return false;
     try {
@@ -570,12 +728,42 @@ class RouteService {
             'rounds': rounds,
             'fastSec': fastSec,
             'slowSec': slowSec,
+            'goalM': goalM,
+            'goalSec': goalSec,
           }) ??
           false;
     } catch (e) {
       debugPrint('Yuruyus baslatilamadi: $e');
       return false;
     }
+  }
+
+  /// Uygulama kisayolu / Hizli Ayarlar kutucugundan gelen eylem
+  /// (workout, water, heatmap, weekly); alindiktan sonra silinir.
+  static Future<String?> takeLaunchAction() async {
+    if (!supported) return null;
+    try {
+      return await _channel.invokeMethod<String>('takeLaunchAction');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Uygulama acikken kisayola basilirsa native haber verir.
+  static void onLaunchAction(VoidCallback handler) {
+    if (!supported) return;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'launchAction') handler();
+      return null;
+    });
+  }
+
+  /// Elle duraklat / devam (bildirim butonlariyla ayni).
+  static Future<void> pauseWorkout(bool pause) async {
+    if (!supported) return;
+    try {
+      await _channel.invokeMethod<bool>(pause ? 'workoutPause' : 'workoutResume');
+    } catch (_) {}
   }
 
   static Future<Workout?> stopWorkout() async {
@@ -601,20 +789,343 @@ class RouteService {
     }
   }
 
-  /// Kayitli yuruyusler (yeniden eskiye).
+  /// Kayitli yuruyusler (yeniden eskiye): cihazdaki kayit + yalnizca
+  /// bulutta olanlar (yeni telefon / yeniden kurulum). Silinenler ve
+  /// verilen isimler uygulanir.
   static Future<List<Workout>> workouts() async {
     if (!supported) return const [];
     try {
-      final raw = await _channel.invokeMethod<String>('workouts');
-      final list = jsonDecode(raw ?? '[]');
+      final prefs = await SharedPreferences.getInstance();
+      final deleted = (prefs.getStringList(_kDeleted) ?? const <String>[]).toSet();
+      final names = _readMap(prefs, _kNames);
+      final byId = <int, Workout>{};
+      for (final w in await _cloudCached(prefs)) {
+        byId[w.startMs] = w;
+      }
+      for (final w in await _localWorkouts()) {
+        byId[w.startMs] = w; // cihazdaki kayit onceliklidir
+      }
+      final res = <Workout>[];
+      for (final w in byId.values) {
+        final id = w.startMs.toString();
+        if (w.startMs <= 0 || deleted.contains(id)) continue;
+        final n = names[id]?.toString();
+        if (n != null && n.isNotEmpty) w.customName = n;
+        res.add(w);
+      }
+      res.sort((a, b) => b.startMs.compareTo(a.startMs));
+      return res;
+    } catch (e) {
+      debugPrint('Antrenmanlar okunamadi: $e');
+      return const [];
+    }
+  }
+
+  static Future<List<Workout>> _localWorkouts() async {
+    final raw = await _channel.invokeMethod<String>('workouts');
+    final list = jsonDecode(raw ?? '[]');
+    if (list is! List) return const [];
+    return [
+      for (final e in list)
+        if (e is Map) Workout.fromJson(Map<String, dynamic>.from(e)),
+    ];
+  }
+
+  static Future<List<Workout>> _cloudCached(SharedPreferences prefs) async {
+    try {
+      final list = jsonDecode(prefs.getString(_kCloudCache) ?? '[]');
       if (list is! List) return const [];
       return [
-        for (final e in list.reversed)
-          if (e is Map<String, dynamic>) Workout.fromJson(e),
+        for (final e in list)
+          if (e is Map) Workout.fromJson(Map<String, dynamic>.from(e)),
       ];
     } catch (_) {
       return const [];
     }
+  }
+
+  static Map<String, dynamic> _readMap(SharedPreferences prefs, String key) {
+    try {
+      final m = jsonDecode(prefs.getString(key) ?? '{}');
+      return m is Map ? Map<String, dynamic>.from(m) : <String, dynamic>{};
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Antrenman bulut senkronu
+  // ------------------------------------------------------------------
+  //
+  // Model: users/{uid}/workouts/{startMs}
+  //   { ...ozet alanlari, name?, deleted?, updatedAt }
+  //
+  // Kuyruk: Firestore yazmalari once cihazdaki kalici onbellege yazilir,
+  // internet gelince (uygulama sonradan kapatilip acilsa da) sunucuya
+  // gonderilir. Bu yuzden commit beklenirken zaman asimi olsa bile kayit
+  // kaybolmaz; "gonderildi" imzasi yalnizca commit yerel kuyruga girdikten
+  // sonra yazilir. Ayni imzali kayit tekrar gonderilmez.
+
+  static const _kDeleted = 'deleted_workouts';
+  static const _kNames = 'workout_names';
+  static const _kCloudCache = 'cloud_workouts';
+  static const _kSent = 'workout_sync_sent';
+
+  static bool _wSyncing = false;
+  static bool _pulledThisSession = false;
+
+  static CollectionReference<Map<String, dynamic>>? get _wCol {
+    final uid = AuthService.instance.currentUser?.uid;
+    if (uid == null) return null;
+    return FirebaseFirestore.instance.collection('users').doc(uid).collection('workouts');
+  }
+
+  /// Yerel antrenmanlari, isimleri ve silmeleri buluta yazar; oturumda bir
+  /// kez buluttakileri ceker. Uygulama acilisinda, arka plana gecerken ve
+  /// antrenman bitince cagrilir.
+  static Future<void> syncWorkouts({bool pull = false}) async {
+    if (!supported || _wSyncing) return;
+    final col = _wCol;
+    if (col == null) return;
+    _wSyncing = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final deleted = (prefs.getStringList(_kDeleted) ?? const <String>[]).toSet();
+      final names = _readMap(prefs, _kNames);
+      final sent = _readMap(prefs, _kSent);
+      final local = await _localWorkouts();
+      final localIds = {for (final w in local) w.startMs.toString()};
+
+      // 1) Cek: bulutta olup cihazda olmayanlar onbellege; buluttaki
+      // silmeler ve isimler cihaza.
+      if (pull || !_pulledThisSession) {
+        try {
+          final snap = await col.get().timeout(const Duration(seconds: 15));
+          final cloudOnly = <Map<String, dynamic>>[];
+          var changed = false;
+          for (final d in snap.docs) {
+            final m = d.data();
+            final id = d.id;
+            if (m['deleted'] == true) {
+              if (deleted.add(id)) changed = true;
+              sent[id] = 'del';
+              continue;
+            }
+            final n = m['name']?.toString();
+            if (n != null && n.isNotEmpty && names[id] == null) {
+              names[id] = n;
+              changed = true;
+            }
+            if (!localIds.contains(id)) cloudOnly.add(_jsonSafe(m));
+          }
+          await prefs.setString(_kCloudCache, jsonEncode(cloudOnly));
+          if (changed) {
+            await prefs.setStringList(_kDeleted, deleted.toList());
+            await prefs.setString(_kNames, jsonEncode(names));
+          }
+          _pulledThisSession = true;
+        } catch (e) {
+          debugPrint('Bulut antrenmanlari okunamadi (sonra denenecek): $e');
+        }
+      }
+
+      // 2) Gonder: degisen/yeni antrenmanlar ve silmeler.
+      final batch = FirebaseFirestore.instance.batch();
+      var ops = 0;
+      final pending = <String, String>{};
+      for (final w in local) {
+        final id = w.startMs.toString();
+        if (w.startMs <= 0 || deleted.contains(id)) continue;
+        final name = names[id]?.toString() ?? '';
+        final sig = '${w.endMs}_${w.distanceM.round()}_$name';
+        if (sent[id] == sig) continue;
+        batch.set(col.doc(id), {
+          ...w.toJson(),
+          if (name.isNotEmpty) 'name': name,
+          'deleted': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        pending[id] = sig;
+        if (++ops >= 400) break;
+      }
+      for (final id in deleted) {
+        if (ops >= 450) break;
+        if (sent[id] == 'del') continue;
+        batch.set(col.doc(id), {
+          'deleted': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        pending[id] = 'del';
+        ops++;
+      }
+      if (ops == 0) return;
+      try {
+        await batch.commit().timeout(const Duration(seconds: 20));
+      } on TimeoutException {
+        // Cevrimdisi: yazma yerel kuyrukta, baglanti gelince gidecek.
+        debugPrint('Antrenman senkronu kuyrukta (cevrimdisi).');
+      }
+      sent.addAll(pending);
+      await prefs.setString(_kSent, jsonEncode(sent));
+    } catch (e) {
+      debugPrint('Antrenman senkronu basarisiz (sonra denenecek): $e');
+    } finally {
+      _wSyncing = false;
+    }
+  }
+
+  /// Firestore Timestamp gibi JSON'a cevrilemeyen alanlar atilir.
+  static Map<String, dynamic> _jsonSafe(Map<String, dynamic> m) => {
+        for (final e in m.entries)
+          if (e.value == null || e.value is num || e.value is String || e.value is bool || e.value is List)
+            e.key: e.value,
+      };
+
+  static Future<void> renameWorkout(int startMs, String newName) async {
+    final prefs = await SharedPreferences.getInstance();
+    final names = _readMap(prefs, _kNames);
+    names[startMs.toString()] = newName;
+    await prefs.setString(_kNames, jsonEncode(names));
+    unawaited(syncWorkouts());
+  }
+
+  /// Bir antrenmanin rota noktalari.
+  static Future<List<LatLng>> workoutPoints(Workout w) async =>
+      [for (final p in await workoutTrack(w)) p.$2];
+
+  /// Zamanli iz (ms, konum): cihazdaki kayittan; cihazda yoksa (yeni telefon)
+  /// buluttaki gunluk rotadan, zamanlar parca icinde esit dagitilarak.
+  static Future<List<(int, LatLng)>> workoutTrack(Workout w) async {
+    if (!supported || w.day.isEmpty) return const [];
+    final end = w.endMs > 0 ? w.endMs : w.startMs + w.durationSec * 1000;
+    try {
+      final raw = await _channel.invokeMethod<String>('getRoutes', {
+        'from': w.day,
+        'to': w.day,
+        'minGap': 3.0,
+      });
+      final map = jsonDecode(raw ?? '{}');
+      final list = map is Map ? map[w.day] : null;
+      final pts = <(int, LatLng)>[
+        if (list is List)
+          for (final e in list)
+            if (e is List &&
+                e.length >= 4 &&
+                (e[1] as num) >= w.startMs - 5000 &&
+                (e[1] as num) <= end + 5000)
+              ((e[1] as num).toInt(), LatLng((e[2] as num).toDouble(), (e[3] as num).toDouble())),
+      ];
+      if (pts.length >= 2) return pts;
+      final d = DateTime.fromMillisecondsSinceEpoch(w.startMs);
+      final day = DateTime(d.year, d.month, d.day);
+      final cloud = await _loadCloud(day, day).timeout(const Duration(seconds: 8));
+      final out = <(int, LatLng)>[];
+      for (final s in cloud[w.day] ?? const <RouteSegment>[]) {
+        if (s.endMs < w.startMs - 5000 || s.startMs > end + 5000) continue;
+        final n = s.points.length;
+        for (var i = 0; i < n; i++) {
+          final t = n == 1 ? s.startMs : s.startMs + ((s.endMs - s.startMs) * i ~/ (n - 1));
+          out.add((t, s.points[i]));
+        }
+      }
+      return out;
+    } catch (e) {
+      debugPrint('Antrenman rotasi okunamadi: $e');
+      return const [];
+    }
+  }
+
+  static final Map<int, SameRouteResult?> _sameCache = {};
+
+  /// Ayni rotada (±%15 mesafe, noktalarin %80'i birbirine 40 m icinde)
+  /// yapilmis onceki antrenmanlarla tempo kiyasi. Eslesme yoksa null.
+  static Future<SameRouteResult?> sameRoute(Workout w) async {
+    if (_sameCache.containsKey(w.startMs)) return _sameCache[w.startMs];
+    final myPace = w.paceSecPerKm;
+    if (w.distanceM < 500 || myPace == null) return null;
+    final mine = await workoutPoints(w);
+    if (mine.length < 5) return null;
+    List<LatLng> sample(List<LatLng> p, int n) => p.length <= n
+        ? p
+        : [for (var i = 0; i < n; i++) p[(i * (p.length - 1)) ~/ (n - 1)]];
+    bool covers(List<LatLng> probe, List<LatLng> target) {
+      var hit = 0;
+      for (final a in probe) {
+        for (final b in target) {
+          if (haversine(a, b) <= 40) {
+            hit++;
+            break;
+          }
+        }
+      }
+      return hit >= probe.length * 0.8;
+    }
+
+    final mineS = sample(mine, 25);
+    final mineT = sample(mine, 400);
+    final others = (await workouts())
+        .where((o) =>
+            o.startMs < w.startMs &&
+            o.paceSecPerKm != null &&
+            (o.distanceM - w.distanceM).abs() <= w.distanceM * 0.15)
+        .take(30)
+        .toList();
+    final matches = <Workout>[];
+    for (final o in others) {
+      final pts = await workoutPoints(o);
+      if (pts.length < 5) continue;
+      if (covers(mineS, sample(pts, 400)) && covers(sample(pts, 25), mineT)) matches.add(o);
+    }
+    SameRouteResult? res;
+    if (matches.isNotEmpty) {
+      final best = matches.reduce((a, b) => a.paceSecPerKm! <= b.paceSecPerKm! ? a : b);
+      res = SameRouteResult(
+        count: matches.length,
+        bestPace: best.paceSecPerKm!,
+        bestDate: best.start,
+        lastPace: matches.first.paceSecPerKm!,
+        myPace: myPace,
+      );
+    }
+    _sameCache[w.startMs] = res;
+    return res;
+  }
+
+  /// GPX 1.1 (Strava / Garmin / Komoot ile uyumlu).
+  static String buildGpx(Workout w, List<(int, LatLng)> track) {
+    String esc(String v) => v
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    String iso(int ms) => DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toIso8601String();
+    final name = esc(w.customName?.isNotEmpty == true ? w.customName! : 'Yürüyüş Defteri antrenmanı');
+    final b = StringBuffer()
+      ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
+      ..writeln('<gpx version="1.1" creator="Yürüyüş Defteri" '
+          'xmlns="http://www.topografix.com/GPX/1/1">')
+      ..writeln('  <metadata><name>$name</name><time>${iso(w.startMs)}</time></metadata>')
+      ..writeln('  <trk><name>$name</name><type>walking</type><trkseg>');
+    for (final p in track) {
+      b.writeln('    <trkpt lat="${p.$2.latitude.toStringAsFixed(6)}" '
+          'lon="${p.$2.longitude.toStringAsFixed(6)}"><time>${iso(p.$1)}</time></trkpt>');
+    }
+    b
+      ..writeln('  </trkseg></trk>')
+      ..writeln('</gpx>');
+    return b.toString();
+  }
+
+  /// Cihazda gizlenir, bulutta "deleted" isaretlenir (diger cihazlarda da
+  /// kaybolur). Rota noktalari gunluk rota kaydinda kalir.
+  static Future<void> deleteWorkout(int startMs, String day) async {
+    final prefs = await SharedPreferences.getInstance();
+    final deleted = prefs.getStringList(_kDeleted) ?? <String>[];
+    if (!deleted.contains(startMs.toString())) {
+      deleted.add(startMs.toString());
+      await prefs.setStringList(_kDeleted, deleted);
+    }
+    unawaited(syncWorkouts());
   }
 
   // ------------------------------------------------------------------
@@ -690,6 +1201,65 @@ class RouteService {
   }
 }
 
+/// Ayni rotadaki onceki antrenmanlarla kiyas (tempo sn/km).
+class SameRouteResult {
+  final int count;
+  final int bestPace;
+  final DateTime bestDate;
+  final int lastPace;
+  final int myPace;
+  const SameRouteResult({
+    required this.count,
+    required this.bestPace,
+    required this.bestDate,
+    required this.lastPace,
+    required this.myPace,
+  });
+
+  bool get isRecord => myPace < bestPace;
+}
+
+/// Isi haritasi: seviyeye gore cizgiler (0: 1 gun ... 3: 10+ gun).
+class HeatmapData {
+  final List<(int, List<LatLng>)> lines;
+  final int days;
+  final double km;
+  final int maxCount;
+  final LatLng? home;
+
+  const HeatmapData({
+    required this.lines,
+    required this.days,
+    required this.km,
+    required this.maxCount,
+    this.home,
+  });
+
+  bool get isEmpty => lines.isEmpty;
+
+  factory HeatmapData.fromJson(Map<String, dynamic> m) {
+    final lines = <(int, List<LatLng>)>[];
+    for (final l in (m['lines'] as List? ?? const [])) {
+      if (l is! List || l.length < 5) continue;
+      final pts = <LatLng>[
+        for (var i = 1; i + 1 < l.length; i += 2)
+          LatLng((l[i] as num).toDouble(), (l[i + 1] as num).toDouble()),
+      ];
+      lines.add(((l[0] as num).toInt(), pts));
+    }
+    final h = m['home'];
+    return HeatmapData(
+      lines: lines,
+      days: (m['days'] as num?)?.toInt() ?? 0,
+      km: (m['km'] as num?)?.toDouble() ?? 0,
+      maxCount: (m['maxCount'] as num?)?.toInt() ?? 0,
+      home: h is List && h.length == 2
+          ? LatLng((h[0] as num).toDouble(), (h[1] as num).toDouble())
+          : null,
+    );
+  }
+}
+
 /// Suren yuruyusun canli durumu.
 class WorkoutStatus {
   final bool active;
@@ -709,6 +1279,22 @@ class WorkoutStatus {
   final bool intervalDone;
   final int phaseLeftSec;
 
+  /// Canli tirmanis / inis (m); barometre yoksa -1.
+  final double elevGain;
+  final double elevLoss;
+
+  /// Otomatik duraklatma: su an duraklatildi mi, hareket suresi (sn),
+  /// ozellik bu antrenmanda calisiyor mu.
+  final bool paused;
+  final bool manualPaused;
+  final int movingSec;
+  final bool autoPause;
+
+  /// Hedef (0: yok) ve ulasildi mi.
+  final int goalM;
+  final int goalSec;
+  final bool goalDone;
+
   const WorkoutStatus({
     this.active = false,
     this.startMs = 0,
@@ -726,7 +1312,28 @@ class WorkoutStatus {
     this.fast = true,
     this.intervalDone = false,
     this.phaseLeftSec = 0,
+    this.goalM = 0,
+    this.goalSec = 0,
+    this.goalDone = false,
+    this.elevGain = -1,
+    this.elevLoss = -1,
+    this.paused = false,
+    this.manualPaused = false,
+    this.movingSec = 0,
+    this.autoPause = false,
   });
+
+  bool get hasGoal => goalM > 0 || goalSec > 0;
+
+  /// Tempo ve hedef icin kullanilan sure: hareket suresi (yoksa toplam).
+  int get activeSec => movingSec > 0 || autoPause ? movingSec : elapsedSec;
+
+  /// Hedef ilerlemesi 0..1.
+  double get goalProgress {
+    if (goalM > 0) return (distanceM / goalM).clamp(0.0, 1.0);
+    if (goalSec > 0) return (activeSec / goalSec).clamp(0.0, 1.0);
+    return 0;
+  }
 
   factory WorkoutStatus.fromJson(Map<String, dynamic> m) => WorkoutStatus(
         active: m['active'] == true,
@@ -748,6 +1355,15 @@ class WorkoutStatus {
         fast: m['fast'] != false,
         intervalDone: m['intervalDone'] == true,
         phaseLeftSec: (m['phaseLeftSec'] as num?)?.toInt() ?? 0,
+        goalM: (m['goalM'] as num?)?.toInt() ?? 0,
+        goalSec: (m['goalSec'] as num?)?.toInt() ?? 0,
+        goalDone: m['goalDone'] == true,
+        elevGain: (m['elevGain'] as num?)?.toDouble() ?? -1,
+        elevLoss: (m['elevLoss'] as num?)?.toDouble() ?? -1,
+        paused: m['paused'] == true,
+        manualPaused: m['manualPaused'] == true,
+        movingSec: (m['movingSec'] as num?)?.toInt() ?? 0,
+        autoPause: m['autoPause'] == true,
       );
 }
 
@@ -766,8 +1382,29 @@ class Workout {
   final bool interval;
   final int rounds;
   final String day;
+  String? customName; // Kullanicinin verdigi isim
 
-  const Workout({
+  /// Barometreyle olculen toplam tirmanis / inis (m); olcum yoksa -1.
+  final double elevGain;
+  final double elevLoss;
+
+  /// Rakim profili: baslangica gore bagil yukseklik (m), esit zaman
+  /// araliklariyla; bos: olcum yok.
+  final List<double> elev;
+
+  final int goalM;
+  final int goalSec;
+  final bool goalDone;
+
+  /// Duraklamalar dahil toplam sure (sn); eski kayitlarda durationSec.
+  final int totalSec;
+
+  /// Otomatik duraklamada gecen sure (sn).
+  int get pausedSec => totalSec > durationSec ? totalSec - durationSec : 0;
+
+  bool get hasElevation => elevGain >= 0 && elev.length >= 2;
+
+  Workout({
     required this.startMs,
     required this.endMs,
     required this.durationSec,
@@ -781,6 +1418,14 @@ class Workout {
     required this.interval,
     required this.rounds,
     required this.day,
+    this.customName,
+    this.elevGain = -1,
+    this.elevLoss = -1,
+    this.elev = const [],
+    this.goalM = 0,
+    this.goalSec = 0,
+    this.goalDone = false,
+    this.totalSec = 0,
   });
 
   factory Workout.fromJson(Map<String, dynamic> m) => Workout(
@@ -800,7 +1445,44 @@ class Workout {
         interval: m['interval'] == true,
         rounds: (m['rounds'] as num?)?.toInt() ?? 0,
         day: m['day']?.toString() ?? '',
+        customName: (m['name'] ?? m['customName'])?.toString(),
+        elevGain: (m['elevGain'] as num?)?.toDouble() ?? -1,
+        elevLoss: (m['elevLoss'] as num?)?.toDouble() ?? -1,
+        elev: [
+          for (final e in (m['elev'] as List? ?? const []))
+            if (e is num) e.toDouble(),
+        ],
+        goalM: (m['goalM'] as num?)?.toInt() ?? 0,
+        goalSec: (m['goalSec'] as num?)?.toInt() ?? 0,
+        goalDone: m['goalDone'] == true,
+        totalSec: (m['totalSec'] as num?)?.toInt() ??
+            (m['durationSec'] as num?)?.toInt() ??
+            0,
       );
+
+  /// Bulut/onbellek icin (native ozetle ayni anahtarlar).
+  Map<String, dynamic> toJson() => {
+        'start': startMs,
+        'end': endMs,
+        'durationSec': durationSec,
+        'totalSec': totalSec,
+        'distanceM': distanceM,
+        'steps': steps,
+        'briskSteps': briskSteps,
+        'briskMin': briskMin,
+        'runSteps': runSteps,
+        'runMin': runMin,
+        'splits': splits,
+        'interval': interval,
+        'rounds': rounds,
+        'day': day,
+        if (elevGain >= 0) 'elevGain': elevGain,
+        if (elevLoss >= 0) 'elevLoss': elevLoss,
+        if (elev.isNotEmpty) 'elev': elev,
+        if (goalM > 0) 'goalM': goalM,
+        if (goalSec > 0) 'goalSec': goalSec,
+        if (goalM > 0 || goalSec > 0) 'goalDone': goalDone,
+      };
 
   DateTime get start => DateTime.fromMillisecondsSinceEpoch(startMs);
 

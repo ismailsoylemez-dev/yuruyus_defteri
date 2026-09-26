@@ -20,6 +20,13 @@ class ShareCardWidget extends StatelessWidget {
     required this.date,
   });
 
+  /// Dakika/km (mm:ss); 200 m altinda anlamsiz.
+  String _pace() {
+    if (distance < 0.2 || minutes <= 0) return '-';
+    final sec = (minutes * 60 / distance).round();
+    return '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')} /km';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -147,7 +154,7 @@ class ShareCardWidget extends StatelessWidget {
                         children: [
                           _StatColumn(label: 'SÜRE', value: Metrics.duration(minutes)),
                           _StatColumn(label: 'KALORİ', value: '$kcal kcal'),
-                          _StatColumn(label: 'TEMPO', value: '${(minutes / (distance > 0 ? distance : 1)).toStringAsFixed(2)} /km'),
+                          _StatColumn(label: 'TEMPO', value: _pace()),
                         ],
                       ),
                       

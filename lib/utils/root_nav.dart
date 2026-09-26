@@ -13,10 +13,14 @@ import '../screens/settings_screen.dart';
 class RootNav {
   static const home = 0;
   static const history = 1;
-  static const achievements = 2;
-  static const route = 3;
+  static const route = 2;
+  static const achievements = 3;
 
   static final tab = ValueNotifier<int>(home);
+
+  /// Kisayoldan "Antrenman baslat": Rota sekmesi acilinca baslatma akisini
+  /// calistirir ve false'a doner.
+  static final startWorkout = ValueNotifier<bool>(false);
 
   /// Ayarlar sayfasini herhangi bir yerden acmak icin (MaterialApp'e bagli).
   static final navigatorKey = GlobalKey<NavigatorState>();

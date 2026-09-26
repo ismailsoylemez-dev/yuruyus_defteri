@@ -3,6 +3,7 @@ package com.ismail.adim_sayar
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -33,6 +34,10 @@ import com.google.android.gms.common.api.ResolvableApiException
  * tek dogru kaynaktir; arayuz ayri bir tahmin yurutmez.
  */
 class MainActivity : FlutterActivity() {
+    companion object {
+        const val EXTRA_SHORTCUT = "shortcut"
+    }
+
 
     private val channelName = "adim_sayar/step_counter"
     private val serviceChannelName = "adim_sayar/service"
@@ -43,6 +48,23 @@ class MainActivity : FlutterActivity() {
     private val reqLocationOn = 7301
 
     private var sink: EventChannel.EventSink? = null
+
+    /** Uygulama kisayolu / Hizli Ayarlar kutucugundan gelen eylem (Flutter alir). */
+    private var launchAction: String? = null
+    private var serviceChannel: MethodChannel? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) launchAction = intent?.getStringExtra(EXTRA_SHORTCUT)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_SHORTCUT)?.let {
+            launchAction = it
+            serviceChannel?.invokeMethod("launchAction", null)
+        }
+    }
     private var sensorManager: SensorManager? = null
     private var listener: SensorEventListener? = null
 
@@ -62,8 +84,8 @@ class MainActivity : FlutterActivity() {
                 }
             })
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, serviceChannelName)
-            .setMethodCallHandler { call, result -> handleService(call.method, call.arguments, result) }
+        serviceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, serviceChannelName)
+            .also { it.setMethodCallHandler { call, result -> handleService(call.method, call.arguments, result) } }
     }
 
     /**
@@ -200,6 +222,8 @@ class MainActivity : FlutterActivity() {
                         }
                         out.put("accepted", r.acceptedToday)
                         out.put("rejected", r.rejectedToday)
+                        out.put("reason", r.reason)
+                        out.put("windowSteps", r.windowSteps)
                     }
                     result.success(out.toString())
                 }
@@ -217,6 +241,33 @@ class MainActivity : FlutterActivity() {
                 "refreshRoute" -> {
                     StepService.instance?.onRouteSettingsChanged()
                     result.success(true)
+                }
+
+                // Kisisel isi haritasi (tum rota gecmisi; arka planda hesaplanir).
+                "heatmap" -> {
+                    val m = args as? Map<*, *>
+                    val cell = (m?.get("cellM") as? Number)?.toDouble() ?: 15.0
+                    val privacy = (m?.get("privacyM") as? Number)?.toDouble() ?: 0.0
+                    val from = m?.get("from") as? String ?: "0000-00-00"
+                    val to = m?.get("to") as? String ?: "9999-99-99"
+                    StepService.instance?.route?.flush()
+                    val app = applicationContext
+                    Thread {
+                        try {
+                            val json = RouteTracker.heatmap(app, cell, privacy, from, to).toString()
+                            main.post { result.success(json) }
+                        } catch (e: Throwable) {
+                            main.post { result.error("heatmap_error", e.message, null) }
+                        }
+                    }.start()
+                }
+
+                // Buluttaki rota gunu cihaza (dosya yoksa).
+                "importRoute" -> {
+                    val m = args as? Map<*, *>
+                    val day = m?.get("day") as? String ?: ""
+                    val csv = m?.get("csv") as? String ?: ""
+                    result.success(RouteTracker.importDay(applicationContext, day, csv))
                 }
 
                 "getRoutes" -> {
@@ -283,10 +334,22 @@ class MainActivity : FlutterActivity() {
                             m?.get("interval") as? Boolean ?: false,
                             (m?.get("rounds") as? Number)?.toInt() ?: 5,
                             (m?.get("fastSec") as? Number)?.toInt() ?: 180,
-                            (m?.get("slowSec") as? Number)?.toInt() ?: 180
+                            (m?.get("slowSec") as? Number)?.toInt() ?: 180,
+                            (m?.get("goalM") as? Number)?.toInt() ?: 0,
+                            (m?.get("goalSec") as? Number)?.toInt() ?: 0
                         )
                         result.success(ok)
                     }
+                }
+
+                "workoutPause" -> {
+                    StepService.instance?.let { it.workout?.pauseManual(); it.notifyNow() }
+                    result.success(true)
+                }
+
+                "workoutResume" -> {
+                    StepService.instance?.let { it.workout?.resumeManual(); it.notifyNow() }
+                    result.success(true)
                 }
 
                 "workoutStop" -> {
@@ -305,6 +368,34 @@ class MainActivity : FlutterActivity() {
                 "isVoiceMuted" -> {
                     val muted = StepService.prefs(this).getBoolean("voice_muted", false)
                     result.success(muted)
+                }
+
+                "takeLaunchAction" -> {
+                    result.success(launchAction)
+                    launchAction = null
+                }
+
+                "getAutoPause" -> {
+                    result.success(StepService.prefs(this).getBoolean(WorkoutManager.K_AUTO_PAUSE, true))
+                }
+
+                "setAutoPause" -> {
+                    val m = args as? Map<*, *>
+                    StepService.prefs(this).edit()
+                        .putBoolean(WorkoutManager.K_AUTO_PAUSE, m?.get("on") as? Boolean ?: true).apply()
+                    result.success(true)
+                }
+
+                "getVoiceEvery" -> {
+                    result.success(StepService.prefs(this).getInt(WorkoutManager.K_VOICE_EVERY, 0))
+                }
+
+                "setVoiceEvery" -> {
+                    val m = args as? Map<*, *>
+                    val v = (m?.get("minutes") as? Number)?.toInt() ?: 0
+                    StepService.prefs(this).edit()
+                        .putInt(WorkoutManager.K_VOICE_EVERY, if (v == 5 || v == 10) v else 0).apply()
+                    result.success(true)
                 }
 
                 "setVoiceMuted" -> {

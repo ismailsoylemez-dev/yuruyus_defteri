@@ -23,14 +23,20 @@ import java.io.File
 import java.util.Locale
 
 /**
- * Gun boyu rota kaydi. GPS'i adim sensoru yonetir:
- *  - kisa surede yeterli adim gelirse konum guncellemeleri acilir,
- *  - [IDLE_STOP_MS] boyunca adim gelmezse kapanir.
- * Boylece GPS yalnizca yururken/kosarken calisir; pil tuketimi dusuk kalir.
+ * Rota kaydi. Iki mod:
+ *  - Antrenman (forced): "Antrenmani Baslat" ile GPS surekli acik; yalniz
+ *    uygulama on plandayken baslatilir, arka plan konum izni gerekmez.
+ *  - Otomatik rota (istege bagli, varsayilan kapali): adim olaylarinin
+ *    GERCEK zamanina bakilir; son [AUTO_WINDOW_MS] icinde en az [AUTO_STEPS]
+ *    adim ve yuruyus en az [AUTO_SPAN_MS] suruyorsa GPS acilir, [IDLE_STOP_MS]
+ *    adimsiz kalinca kapanir. Olcum seyrek ve toplu teslimli (pil).
+ *
+ * Eski surum yalnizca 60 sn'den taze adim olaylarini sayiyordu; ekran
+ * kapaliyken sensor olaylari toplu/gecikmeli geldigi icin esik hic
+ * dolmuyor ve GPS hic acilmiyordu. Artik olay zamani kullaniliyor.
  *
  * Kayit: filesDir/routes/yyyy-MM-dd.csv
- *   satir = parca,zamanMs,enlem,boylam,dogrulukM
- * "parca" 5 dakikadan uzun duraklamada artar; harita her parcayi ayri cizer.
+ *   satir = parca,zamanMs,enlem,boylam,dogrulukM,adim
  */
 class RouteTracker(
     private val ctx: Context,
@@ -42,15 +48,24 @@ class RouteTracker(
 ) {
 
     companion object {
-        const val K_ROUTE_ENABLED = "routeEnabled"
+        /** Eski anahtar (her antrenmanda true yaziliyordu); artik okunmaz. */
+        const val K_ROUTE_ENABLED_LEGACY = "routeEnabled"
+
+        /** Otomatik rota (arka planda yururken iz) acik mi. Varsayilan kapali. */
+        const val K_ROUTE_ENABLED = "routeAutoV2"
         private const val DIR = "routes"
 
-        /** GPS'i acmak icin [START_WINDOW_MS] icinde gereken adim. Sensor gurultusu icin yukseltildi. */
-        private const val START_STEPS = 25
-        private const val START_WINDOW_MS = 60_000L
+        // ---- Otomatik mod tetigi (olay zamanina gore) ----
+        private const val AUTO_WINDOW_MS = 120_000L
+        private const val AUTO_STEPS = 160
+        private const val AUTO_SPAN_MS = 90_000L
+        /** Son adim bundan eskiyse "su an yurumuyor" sayilir. */
+        private const val FRESH_MS = 45_000L
 
-        /** Bu kadar adim gelmezse GPS kapanir (Pil optimizasyonu icin 60s). */
-        private const val IDLE_STOP_MS = 60_000L
+        /** Otomatik modda bu kadar adimsiz kalinca GPS kapanir. */
+        private const val IDLE_STOP_MS = 90_000L
+        /** Antrenmanda uzun mola (5 dk) GPS'i kapatir; adim gelince geri acilir. */
+        private const val WORKOUT_IDLE_STOP_MS = 300_000L
         private const val IDLE_CHECK_MS = 15_000L
 
         /** Bundan uzun bosluk yeni parca baslatir. */
@@ -59,8 +74,9 @@ class RouteTracker(
         /** Bundan kotu dogruluktaki konum atilir (bina ici sicramalar). */
         const val MAX_ACCURACY_M = 50f
 
-        /** Kucuk hareketler de cizilsin: 2 m ve uzeri yer degistirme kaydedilir. */
-        private const val MIN_MOVE_M = 2f
+        /** Antrenmanda 2 m, otomatik modda 5 m yer degistirme kaydedilir. */
+        private const val MIN_MOVE_WORKOUT_M = 2f
+        private const val MIN_MOVE_AUTO_M = 5f
 
         /** Yaya icin imkansiz hiz (~43 km/sa): GPS sicramasi sayilir. */
         private const val MAX_SPEED_MPS = 12f
@@ -141,6 +157,201 @@ class RouteTracker(
             return out
         }
 
+        /**
+         * Kisisel isi haritasi: tum gunlerin rotalari ~[cellM] m'lik karelere
+         * bolunur; her kare gecisinin (kenarin) kac FARKLI gunde yuruldugu
+         * sayilir. Ayni kenar bir kez cizilir; ardisik ve ayni seviyedeki
+         * kenarlar tek cizgide birlesir (harita binlerce parcayla yorulmasin).
+         *
+         * [privacyM] > 0 ise en sik baslanan/bitirilen kare "ev" sayilir ve
+         * cevresindeki [privacyM] metre cizilmez.
+         *
+         * Donus: { lines: [[seviye, lat, lng, lat, lng, ...], ...],
+         *          days, km, maxCount, home: [lat, lng]? }
+         * seviye: 0 = 1 gun, 1 = 2-4, 2 = 5-9, 3 = 10+ gun.
+         */
+        fun heatmap(
+            c: Context,
+            cellM: Double,
+            privacyM: Double,
+            from: String = "0000-00-00",
+            to: String = "9999-99-99"
+        ): JSONObject {
+            val files = (dir(c).listFiles() ?: emptyArray())
+                .filter { it.name.endsWith(".csv") }
+                .filter { val d = it.name.removeSuffix(".csv"); d >= from && d <= to }
+                .sortedBy { it.name }
+            val out = JSONObject()
+            val lines = JSONArray()
+            out.put("lines", lines)
+            if (files.isEmpty()) {
+                out.put("days", 0); out.put("km", 0.0); out.put("maxCount", 0)
+                return out
+            }
+
+            // Gun gun seyreltilmis parcalar: her parca DoubleArray(lat, lng, ...)
+            fun readThinned(f: File): List<DoubleArray> {
+                val segs = mutableListOf<DoubleArray>()
+                var cur = ArrayList<Double>()
+                var lastSeg = Int.MIN_VALUE
+                var lastLat = 0.0
+                var lastLng = 0.0
+                val res = FloatArray(1)
+                try {
+                    f.forEachLine { line ->
+                        val p = line.split(',')
+                        if (p.size < 4) return@forEachLine
+                        val seg = p[0].toIntOrNull() ?: return@forEachLine
+                        val lat = p[2].toDoubleOrNull() ?: return@forEachLine
+                        val lng = p[3].toDoubleOrNull() ?: return@forEachLine
+                        if (seg != lastSeg) {
+                            if (cur.size >= 4) segs.add(cur.toDoubleArray())
+                            cur = ArrayList()
+                            cur.add(lat); cur.add(lng)
+                            lastSeg = seg; lastLat = lat; lastLng = lng
+                            return@forEachLine
+                        }
+                        Location.distanceBetween(lastLat, lastLng, lat, lng, res)
+                        if (res[0] >= cellM / 2) {
+                            cur.add(lat); cur.add(lng)
+                            lastLat = lat; lastLng = lng
+                        }
+                    }
+                } catch (e: Exception) {
+                }
+                if (cur.size >= 4) segs.add(cur.toDoubleArray())
+                return segs
+            }
+
+            val all = files.map { readThinned(it) }
+            val first = all.firstOrNull { it.isNotEmpty() }?.first()
+            if (first == null) {
+                out.put("days", 0); out.put("km", 0.0); out.put("maxCount", 0)
+                return out
+            }
+            val lat0 = first[0]
+            val dLat = cellM / 111_320.0
+            val dLng = cellM / (111_320.0 * Math.cos(Math.toRadians(lat0)).coerceAtLeast(0.2))
+            fun cell(lat: Double, lng: Double): Long {
+                val y = Math.floor(lat / dLat).toLong()
+                val x = Math.floor(lng / dLng).toLong()
+                return (y shl 32) xor (x and 0xffffffffL)
+            }
+            fun edge(a: Long, b: Long): Pair<Long, Long> = if (a < b) a to b else b to a
+
+            // 1) Kenar basina farkli gun sayisi + ev tahmini (uc noktalar)
+            val counts = HashMap<Pair<Long, Long>, Int>()
+            val ends = HashMap<Long, Int>()
+            val endPos = HashMap<Long, DoubleArray>()
+            var days = 0
+            for (segs in all) {
+                if (segs.isEmpty()) continue
+                days++
+                val seen = HashSet<Pair<Long, Long>>()
+                for (arr in segs) {
+                    val n = arr.size / 2
+                    for (k in intArrayOf(0, n - 1)) {
+                        val cc = cell(arr[k * 2], arr[k * 2 + 1])
+                        ends[cc] = (ends[cc] ?: 0) + 1
+                        endPos.getOrPut(cc) { doubleArrayOf(arr[k * 2], arr[k * 2 + 1]) }
+                    }
+                    var prev = cell(arr[0], arr[1])
+                    for (i in 1 until n) {
+                        val cc = cell(arr[i * 2], arr[i * 2 + 1])
+                        if (cc == prev) continue
+                        val e = edge(prev, cc)
+                        if (seen.add(e)) counts[e] = (counts[e] ?: 0) + 1
+                        prev = cc
+                    }
+                }
+            }
+
+            var home: DoubleArray? = null
+            if (privacyM > 0) {
+                ends.maxByOrNull { it.value }?.let { if (it.value >= 3) home = endPos[it.key] }
+            }
+            val res = FloatArray(1)
+            fun hidden(lat: Double, lng: Double): Boolean {
+                val h = home ?: return false
+                Location.distanceBetween(h[0], h[1], lat, lng, res)
+                return res[0] < privacyM
+            }
+            fun level(n: Int): Int = when {
+                n >= 10 -> 3
+                n >= 5 -> 2
+                n >= 2 -> 1
+                else -> 0
+            }
+
+            // 2) Cizgiler: her kenar bir kez, ayni seviyede ardisik kenarlar birlesir.
+            val emitted = HashSet<Pair<Long, Long>>()
+            var km = 0.0
+            var maxCount = 0
+            for (segs in all) {
+                for (arr in segs) {
+                    val n = arr.size / 2
+                    var line: JSONArray? = null
+                    var lineLevel = -1
+                    var prevCell = cell(arr[0], arr[1])
+                    for (i in 1 until n) {
+                        val aLat = arr[(i - 1) * 2]; val aLng = arr[(i - 1) * 2 + 1]
+                        val bLat = arr[i * 2]; val bLng = arr[i * 2 + 1]
+                        val cc = cell(bLat, bLng)
+                        val e = if (cc == prevCell) null else edge(prevCell, cc)
+                        prevCell = cc
+                        val skip = e == null || !emitted.add(e) ||
+                            hidden(aLat, aLng) || hidden(bLat, bLng)
+                        if (skip) {
+                            if (e != null) {
+                                // Ayni kenar daha once cizildi / gizli: cizgi kesilir.
+                                line = null
+                            }
+                            continue
+                        }
+                        val cnt = counts[e!!] ?: 1
+                        if (cnt > maxCount) maxCount = cnt
+                        val lv = level(cnt)
+                        Location.distanceBetween(aLat, aLng, bLat, bLng, res)
+                        km += res[0] / 1000.0
+                        val l = line
+                        if (l != null && lv == lineLevel) {
+                            l.put(round5(bLat)).put(round5(bLng))
+                        } else {
+                            val nl = JSONArray().put(lv)
+                                .put(round5(aLat)).put(round5(aLng))
+                                .put(round5(bLat)).put(round5(bLng))
+                            lines.put(nl)
+                            line = nl
+                            lineLevel = lv
+                        }
+                    }
+                }
+            }
+            out.put("days", days)
+            out.put("km", Math.round(km * 10) / 10.0)
+            out.put("maxCount", maxCount)
+            home?.let { out.put("home", JSONArray().put(round5(it[0])).put(round5(it[1]))) }
+            return out
+        }
+
+        /**
+         * Buluttan gelen gunu cihaza yazar (yeni telefon / yeniden kurulum).
+         * Gunun dosyasi zaten varsa dokunulmaz. [csv]: "parca,zaman,enlem,boylam" satirlari.
+         */
+        fun importDay(c: Context, day: String, csv: String): Boolean {
+            if (!Regex("\\d{4}-\\d{2}-\\d{2}").matches(day)) return false
+            val f = File(dir(c), "$day.csv")
+            if (f.exists() && f.length() > 0) return false
+            return try {
+                f.writeText(csv)
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+        private fun round5(v: Double): Double = Math.round(v * 100_000.0) / 100_000.0
+
         /** Telefonun "Konum" anahtari acik mi (kapaliysa GPS hic veri vermez). */
         fun locationOn(c: Context): Boolean =
             try {
@@ -162,9 +373,17 @@ class RouteTracker(
     var active = false
         private set
 
-    private var windowStart = 0L
-    private var windowSteps = 0
-    private var lastStepAt = 0L
+    /** Otomatik mod icin son adim olaylari: (olay zamani ms, adim). */
+    private val recent = ArrayDeque<Pair<Long, Int>>()
+    /** Son adimin duvar saati (ms); olay zamanina gore. */
+    private var lastStepWall = 0L
+
+    /** GPS neden kapali / acik (Rota ekraninda gosterilir). */
+    @Volatile var reason = ""
+        private set
+    /** Son 2 dk'daki adim (otomatik tetik ilerlemesi). */
+    @Volatile var windowSteps = 0
+        private set
 
     private var last: Location? = null
     private var lastDay = ""
@@ -198,34 +417,35 @@ class RouteTracker(
         }
     }
 
-    /**
-     * Yuruyus kaydi (baslat/bitir) acikken GPS adimlardan bagimsiz surekli
-     * aciktir; durunca kapanmaz.
-     */
+    /** Antrenman acikken GPS adimlardan bagimsiz aciktir. */
     @Volatile var forced = false
         private set
+
+    /** Su anki istek antrenman ayariyla mi acildi (mod degisince yeniden kurulur). */
+    private var requestIsWorkout = false
 
     /** Sonraki kabul edilen nokta yeni parca baslatsin (yuruyus basladi). */
     private var newSegment = false
 
     fun setForced(on: Boolean) {
         forced = on
+        lastStepWall = System.currentTimeMillis()
         if (on) {
             newSegment = true
-            lastStepAt = SystemClock.elapsedRealtime()
-            start()
+            restart()
+        } else if (active) {
+            // Antrenman bitti: otomatik mod kapaliysa GPS kapanir,
+            // aciksa seyrek ayara gecer.
+            if (autoAllowed()) restart() else stop()
         }
+        updateReason()
     }
 
     private val idleCheck = object : Runnable {
         override fun run() {
             if (!active) return
-            if (forced) {
-                flush()
-                handler.postDelayed(this, IDLE_CHECK_MS)
-                return
-            }
-            if (SystemClock.elapsedRealtime() - lastStepAt > IDLE_STOP_MS) {
+            val limit = if (forced) WORKOUT_IDLE_STOP_MS else IDLE_STOP_MS
+            if (System.currentTimeMillis() - lastStepWall > limit) {
                 stop()
             } else {
                 flush()
@@ -236,56 +456,112 @@ class RouteTracker(
 
     init {
         trimOld()
+        updateReason()
     }
 
-    /** StepService her adim artisinda cagirir. */
-    fun onSteps(delta: Int) {
+    /** Otomatik mod baslayabilir mi (izin + konum + arka plan kosulu). */
+    private fun autoAllowed(): Boolean =
+        isEnabled(ctx) && hasFine(ctx) && locationOn(ctx) &&
+            (StepService.appInForeground || hasBackground(ctx))
+
+    /**
+     * StepService her adim artisinda cagirir. [eventWallMs]: olayin gercek
+     * zamani (toplu teslimde gecmiste olabilir).
+     */
+    fun onSteps(delta: Int, eventWallMs: Long = System.currentTimeMillis()) {
         if (delta <= 0) return
-        val now = SystemClock.elapsedRealtime()
-        lastStepAt = now
-        if (active) return
-        if (!isEnabled(ctx) || !hasFine(ctx)) return
-        // Telefonun Konum anahtari kapaliysa GPS hic veri vermez; "kaydediliyor"
-        // gorunmesin diye hic baslatilmaz (uygulama bu anahtari kendisi acamaz).
-        if (!locationOn(ctx)) return
-        if (now - windowStart > START_WINDOW_MS) {
-            windowStart = now
-            windowSteps = 0
+        val now = System.currentTimeMillis()
+        val t = if (eventWallMs in (now - 6 * 3_600_000L)..now) eventWallMs else now
+        if (t > lastStepWall) lastStepWall = t
+
+        if (forced) {
+            if (!active && hasFine(ctx) && locationOn(ctx)) restart()
+            return
         }
-        windowSteps += delta
-        if (windowSteps >= START_STEPS) start()
+        recent.addLast(t to delta)
+        while (recent.isNotEmpty() && recent.first().first < now - AUTO_WINDOW_MS) recent.removeFirst()
+        windowSteps = recent.sumOf { it.second }
+        if (active) return
+        if (!autoAllowed()) {
+            updateReason()
+            return
+        }
+        val span = if (recent.isEmpty()) 0L else recent.last().first - recent.first().first
+        val fresh = now - lastStepWall <= FRESH_MS
+        if (windowSteps >= AUTO_STEPS && span >= AUTO_SPAN_MS && fresh) {
+            newSegment = true
+            restart()
+        } else {
+            updateReason()
+        }
     }
 
-    /** Ayar kapatildiysa GPS hemen durur. */
+    /** Ayar/izin degisti. */
     fun onSettingsChanged() {
-        if (!isEnabled(ctx) || !hasFine(ctx)) {
+        if (!hasFine(ctx)) {
             forced = false
             stop()
+        } else if (!forced && active && !autoAllowed()) {
+            stop()
+        }
+        updateReason()
+    }
+
+    private fun updateReason() {
+        reason = when {
+            !hasFine(ctx) -> "Konum izni yok"
+            !locationOn(ctx) -> "Telefonun Konum özelliği kapalı"
+            forced && active -> "Antrenman kaydı"
+            forced -> "Antrenman: hareket bekleniyor"
+            active -> "Otomatik rota kaydediliyor"
+            !isEnabled(ctx) -> "Otomatik rota kapalı · GPS sadece antrenmanda"
+            !StepService.appInForeground && !hasBackground(ctx) ->
+                "Arka plan konum izni yok · uygulama kapalıyken otomatik rota çalışmaz"
+            else -> "Otomatik rota · yürüyüş bekleniyor ($windowSteps/$AUTO_STEPS adım)"
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun start() {
-        if (active) return
+    private fun restart() {
+        val workout = forced
+        if (active && requestIsWorkout == workout) return
+        if (active) {
+            try { client.removeLocationUpdates(callback) } catch (e: Exception) {}
+            active = false
+        }
         try {
-            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3_000L)
-                .setMinUpdateIntervalMillis(1_000L)
-                .setMinUpdateDistanceMeters(MIN_MOVE_M)
-                // Ekran kapaliyken noktalar toplu teslim edilebilir (pil).
-                .setMaxUpdateDelayMillis(10_000L)
-                .setWaitForAccurateLocation(false)
-                .build()
+            val request = if (workout) {
+                LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
+                    .setMinUpdateIntervalMillis(1_000L)
+                    .setMinUpdateDistanceMeters(MIN_MOVE_WORKOUT_M)
+                    .setMaxUpdateDelayMillis(4_000L)
+                    .setWaitForAccurateLocation(false)
+                    .build()
+            } else {
+                // Otomatik: 5 sn aralik, 30 sn'ye kadar toplu teslim (CPU az uyanir).
+                LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
+                    .setMinUpdateIntervalMillis(3_000L)
+                    .setMinUpdateDistanceMeters(MIN_MOVE_AUTO_M)
+                    .setMaxUpdateDelayMillis(30_000L)
+                    .setWaitForAccurateLocation(false)
+                    .build()
+            }
             client.requestLocationUpdates(request, callback, Looper.getMainLooper())
             active = true
+            requestIsWorkout = workout
+            recent.clear()
             windowSteps = 0
             handler.removeCallbacks(idleCheck)
             handler.postDelayed(idleCheck, IDLE_CHECK_MS)
-            onStateChanged()
         } catch (e: SecurityException) {
             active = false
+            reason = "Konum izni reddedildi"
         } catch (e: Exception) {
             active = false
+            reason = "GPS başlatılamadı: ${e.javaClass.simpleName}"
         }
+        if (active) updateReason()
+        onStateChanged()
     }
 
     fun stop() {
@@ -298,6 +574,7 @@ class RouteTracker(
             active = false
             onStateChanged()
         }
+        updateReason()
         flush()
     }
 
@@ -325,7 +602,7 @@ class RouteTracker(
             val dtMs = time - prev.time
             if (dtMs < 0) return
             val dist = prev.distanceTo(loc)
-            if (dist < MIN_MOVE_M) return
+            if (dist < (if (requestIsWorkout) MIN_MOVE_WORKOUT_M else MIN_MOVE_AUTO_M)) return
             if (dtMs > 0 && dist / (dtMs / 1000f) > MAX_SPEED_MPS) {
                 rejectedToday++
                 return

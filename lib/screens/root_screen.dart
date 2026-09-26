@@ -6,6 +6,8 @@ import '../providers/step_provider.dart';
 import '../providers/water_provider.dart';
 import '../services/route_service.dart';
 import 'achievements_screen.dart';
+import 'heatmap_screen.dart';
+import 'insights_screen.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
 import 'route_screen.dart';
@@ -47,6 +49,7 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
       step.flushCloud();
       // Rotanin son 30 gunu (degistiyse) buluta yedeklenir.
       RouteService.syncRecent();
+      RouteService.syncWorkouts();
     } else if (state == AppLifecycleState.resumed) {
       // Native servisin diske yazdigi degerleri tazele, gun gecisini
       // kontrol et ve servisin tuttugu kayitlari al.
@@ -57,6 +60,8 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
       });
       // Konum izni ayarlardan degistiyse servis tipi tazelenir.
       RouteService.refresh();
+      RouteService.syncWorkouts();
+      _handleLaunchAction();
       _calibrateStride();
     }
   }
@@ -64,8 +69,8 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
   static const _pages = [
     HomeScreen(),
     HistoryScreen(),
-    AchievementsScreen(),
     RouteScreen(embedded: true),
+    AchievementsScreen(),
   ];
 
   /// Rota kayitlarindan adim boyu olculur; degistiyse tum km/kcal
@@ -80,6 +85,34 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
     await step.refreshAll(force: true);
   }
 
+  /// Uygulama kisayolu / Hizli Ayarlar kutucugu eylemleri.
+  Future<void> _handleLaunchAction() async {
+    final action = await RouteService.takeLaunchAction();
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'workout':
+        RootNav.go(RootNav.route);
+        RootNav.startWorkout.value = true;
+      case 'water':
+        await context.read<WaterProvider>().addWater(250);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('+250 ml su eklendi 💧'),
+        ));
+      case 'heatmap':
+        RootNav.go(RootNav.route);
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const HeatmapScreen()),
+        );
+      case 'weekly':
+        RootNav.go(RootNav.home);
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const InsightsScreen(weekly: true)),
+        );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +123,9 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       _calibrateStride();
+      RouteService.syncWorkouts(pull: true);
+      RouteService.onLaunchAction(_handleLaunchAction);
+      _handleLaunchAction();
       _step!.start().then((_) {
         // Kontrol et ve gerekirse haftalik raporu goster
         if (mounted) WeeklyReportDialog.checkAndShow(context);
@@ -124,14 +160,14 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
             label: 'Geçmiş',
           ),
           NavigationDestination(
+            icon: Icon(Icons.directions_run_outlined),
+            selectedIcon: Icon(Icons.directions_run),
+            label: 'Antrenman',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.emoji_events_outlined),
             selectedIcon: Icon(Icons.emoji_events),
             label: 'Başarılar',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'Rota ve Yürüyüş',
           ),
         ],
       ),

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="workout"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_workout"
+        android:shortcutShortLabel="@string/sc_workout_short"
+        android:shortcutLongLabel="@string/sc_workout_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.ismail.adim_sayar"
+            android:targetClass="com.ismail.adim_sayar.MainActivity">
+            <extra android:name="shortcut" android:value="workout" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="water"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_water"
+        android:shortcutShortLabel="@string/sc_water_short"
+        android:shortcutLongLabel="@string/sc_water_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.ismail.adim_sayar"
+            android:targetClass="com.ismail.adim_sayar.MainActivity">
+            <extra android:name="shortcut" android:value="water" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="heatmap"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_heatmap"
+        android:shortcutShortLabel="@string/sc_heatmap_short"
+        android:shortcutLongLabel="@string/sc_heatmap_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.ismail.adim_sayar"
+            android:targetClass="com.ismail.adim_sayar.MainActivity">
+            <extra android:name="shortcut" android:value="heatmap" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="weekly"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_weekly"
+        android:shortcutShortLabel="@string/sc_weekly_short"
+        android:shortcutLongLabel="@string/sc_weekly_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.ismail.adim_sayar"
+            android:targetClass="com.ismail.adim_sayar.MainActivity">
+            <extra android:name="shortcut" android:value="weekly" />
+        </intent>
+    </shortcut>
+</shortcuts>

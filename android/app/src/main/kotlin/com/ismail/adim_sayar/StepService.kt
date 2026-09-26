@@ -71,6 +71,9 @@ class StepService : Service(), SensorEventListener {
         const val ACTION_EVENING = "com.ismail.adim_sayar.EVENING"
         const val ACTION_WEEKLY = "com.ismail.adim_sayar.WEEKLY"
         const val ACTION_STANDUP = "com.ismail.adim_sayar.STANDUP"
+        const val ACTION_WORKOUT_PAUSE = "com.ismail.adim_sayar.WORKOUT_PAUSE"
+        const val ACTION_WORKOUT_RESUME = "com.ismail.adim_sayar.WORKOUT_RESUME"
+        const val ACTION_WORKOUT_STOP = "com.ismail.adim_sayar.WORKOUT_STOP"
         private const val WEEKLY_NOTIF_ID = 1003
         private const val STANDUP_NOTIF_ID = 1004
 
@@ -104,6 +107,10 @@ class StepService : Service(), SensorEventListener {
 
         /** Tek olayda saatlik kayda yazilabilecek en fazla artis. */
         private const val MAX_HOURLY_DELTA = 20_000
+
+        /** Otomatik rota: uyanik adim dedektorunun en fazla teslim gecikmesi. */
+        private const val DETECTOR_LATENCY_US = 20_000_000
+        private const val WORKOUT_DETECTOR_LATENCY_US = 2_000_000
 
         // ---- Tempo siniflandirmasi (adim sayimindan bagimsiz) ----
         // Her tamamlanan takvim dakikasinin adim sayisi = kadans (adim/dk).
@@ -264,6 +271,7 @@ class StepService : Service(), SensorEventListener {
         }
         sm.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, 0)
         sensorManager = sm
+        updateAutoDetector()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -282,6 +290,12 @@ class StepService : Service(), SensorEventListener {
         if (intent?.action == ACTION_STANDUP) {
             onStandup()
             return START_STICKY
+        }
+        // Bildirimdeki antrenman butonlari.
+        when (intent?.action) {
+            ACTION_WORKOUT_PAUSE -> { workout?.pauseManual(); notifyNow(); return START_STICKY }
+            ACTION_WORKOUT_RESUME -> { workout?.resumeManual(); notifyNow(); return START_STICKY }
+            ACTION_WORKOUT_STOP -> { stopWorkout(); return START_STICKY }
         }
         if (intent != null) {
             applyProfile(
@@ -328,9 +342,10 @@ class StepService : Service(), SensorEventListener {
         if (delta in 1..MAX_HOURLY_DELTA) {
             addHourly(date, hourOf(event), delta)
             addToMinute(eventMillis(event), delta)
-            // Toplu/gecikmeli teslim edilen eski adimlar GPS'i acmasin.
-            if (!reset && System.currentTimeMillis() - eventMillis(event) < 60_000L) {
-                route?.onSteps(delta)
+            // Rota tetigi olayin GERCEK zamaniyla beslenir (toplu teslimde de).
+            // Uyanik adim dedektoru kayitliysa tetigi o besler (cift sayim olmasin).
+            if (!reset && autoDetector == null) {
+                route?.onSteps(delta, eventMillis(event))
             }
         }
         putHistory(date, todaySteps)
@@ -355,6 +370,8 @@ class StepService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         sensorManager?.unregisterListener(this)
+        autoDetector?.let { sensorManager?.unregisterListener(it) }
+        autoDetector = null
         workout?.shutdown()
         route?.shutdown()
         handler.removeCallbacks(idleTick)
@@ -424,12 +441,21 @@ class StepService : Service(), SensorEventListener {
     }
 
     /** Uygulama on plandayken cagrilir (konum servis tipi eklenebilsin). */
-    fun startWorkout(interval: Boolean, rounds: Int, fastSec: Int, slowSec: Int): Boolean {
+    fun startWorkout(
+        interval: Boolean,
+        rounds: Int,
+        fastSec: Int,
+        slowSec: Int,
+        goalM: Int = 0,
+        goalSec: Int = 0
+    ): Boolean {
         val w = workout ?: return false
         if (w.active) return true
-        prefs(this).edit().putBoolean(RouteTracker.K_ROUTE_ENABLED, true).apply()
-        onRouteSettingsChanged()
-        w.start(interval, rounds, fastSec, slowSec)
+        if (!RouteTracker.hasFine(this)) return false
+        w.start(interval, rounds, fastSec, slowSec, goalM, goalSec)
+        updateAutoDetector()
+        // Uygulama on planda: servis "location" tipini alir (arka plan izni gerekmez).
+        startForegroundTyped()
         route?.setForced(true)
         notifyNow()
         return true
@@ -439,6 +465,9 @@ class StepService : Service(), SensorEventListener {
         val summary = workout?.stop()
         route?.setForced(false)
         route?.flush()
+        updateAutoDetector()
+        // Antrenman bitti: otomatik rota kapaliysa "location" tipi birakilir.
+        startForegroundTyped()
         notifyNow()
         return summary
     }
@@ -523,7 +552,63 @@ class StepService : Service(), SensorEventListener {
     fun onRouteSettingsChanged() {
         startForegroundTyped()
         route?.onSettingsChanged()
+        updateAutoDetector()
         notifyNow()
+    }
+
+    // ------------------------------------------------------------------
+    // Otomatik rota tetigi: uyanik (wake-up) adim dedektoru
+    // ------------------------------------------------------------------
+
+    /**
+     * Otomatik rota acikken kayitli uyanik adim dedektoru. Ekran kapaliyken
+     * adim sayaci olaylari islemci uyuyana kadar bekletilebilir; uyanik
+     * sensor en gec [DETECTOR_LATENCY_US] icinde teslim eder. Adim SAYIMI
+     * etkilenmez (sayim hala TYPE_STEP_COUNTER'dan).
+     */
+    private var autoDetector: SensorEventListener? = null
+    private var autoDetectorLatencyUs = -1
+
+    /**
+     * Uyanik adim dedektoru: otomatik rota tetigi ve antrenmanda otomatik
+     * duraklatma icin. Antrenmanda 2 sn, aksi halde 20 sn teslim gecikmesi.
+     * Uyanik surum yoksa normal dedektor kullanilir (antrenmanda GPS islemciyi
+     * zaten sik uyandirir).
+     */
+    private fun updateAutoDetector() {
+        val workoutOn = workout?.active == true
+        val want = workoutOn || (RouteTracker.isEnabled(this) && RouteTracker.hasFine(this))
+        val sm = sensorManager ?: return
+        val latency = if (workoutOn) WORKOUT_DETECTOR_LATENCY_US else DETECTOR_LATENCY_US
+        if (autoDetector != null && (!want || latency != autoDetectorLatencyUs)) {
+            try { sm.unregisterListener(autoDetector) } catch (e: Exception) {}
+            autoDetector = null
+            autoDetectorLatencyUs = -1
+        }
+        if (want && autoDetector == null) {
+            val det = sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR, true)
+                ?: (if (workoutOn) sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR) else null)
+            if (det != null) {
+                val l = object : SensorEventListener {
+                    override fun onSensorChanged(event: SensorEvent?) {
+                        if (event == null) return
+                        val t = eventMillis(event)
+                        route?.onSteps(1, t)
+                        workout?.onStep(t)
+                    }
+                    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                }
+                try {
+                    if (sm.registerListener(l, det, SensorManager.SENSOR_DELAY_NORMAL, latency)) {
+                        autoDetector = l
+                        autoDetectorLatencyUs = latency
+                    }
+                } catch (e: Exception) {
+                }
+            }
+        }
+        // Dedektor yoksa otomatik duraklatma calismaz (sayac gecikmeli gelir).
+        workout?.stepFeedLive = autoDetector != null
     }
 
     /** Konum tipi su an servise ekli mi (rota durum ekrani icin). */
@@ -539,9 +624,18 @@ class StepService : Service(), SensorEventListener {
      */
     private fun startForegroundTyped() {
         val notification = buildNotification()
-        val wantLocation = RouteTracker.isEnabled(this) &&
-            RouteTracker.hasFine(this) &&
-            (appInForeground || RouteTracker.hasBackground(this))
+        val workoutOn = workout?.active == true
+        val bg = RouteTracker.hasBackground(this)
+        // Antrenman surerken arka planda tip degistirilmez: "while-in-use"
+        // izniyle location tipi yalnizca on planda verilebilir; yeniden
+        // bildirmek SecurityException'la tipi dusururdu (GPS kesilirdi).
+        if (workoutOn && locationTypeActive && !appInForeground && !bg) {
+            notificationManager()?.notify(NOTIF_ID, notification)
+            return
+        }
+        val wantLocation = RouteTracker.hasFine(this) &&
+            ((workoutOn && (appInForeground || bg)) ||
+                (RouteTracker.isEnabled(this) && (appInForeground || bg)))
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notification)
             locationTypeActive = wantLocation
@@ -1239,7 +1333,7 @@ class StepService : Service(), SensorEventListener {
             )
         } else null
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_directions)
             .setContentTitle("Yürüyüş Defteri · hedefin %$percent")
             .setContentText(short)
@@ -1249,6 +1343,21 @@ class StepService : Service(), SensorEventListener {
             .setSilent(true)
             .setShowWhen(false)
             .setContentIntent(pending)
-            .build()
+        // Antrenman surerken kilit ekraninda da gorunen kontrol butonlari.
+        val w = workout
+        if (w != null && w.active) {
+            fun act(action: String, req: Int): PendingIntent = PendingIntent.getService(
+                this, req, Intent(this, StepService::class.java).setAction(action),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (w.paused) {
+                b.addAction(android.R.drawable.ic_media_play, "Devam", act(ACTION_WORKOUT_RESUME, 41))
+            } else {
+                b.addAction(android.R.drawable.ic_media_pause, "Duraklat", act(ACTION_WORKOUT_PAUSE, 42))
+            }
+            b.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Bitir", act(ACTION_WORKOUT_STOP, 43))
+            b.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        }
+        return b.build()
     }
 }

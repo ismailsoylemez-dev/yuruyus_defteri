@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Yürüyüş Defteri</string>
+    <string name="sc_workout_short">Antrenman başlat</string>
+    <string name="sc_workout_long">Antrenmanı başlat</string>
+    <string name="sc_water_short">Su ekle</string>
+    <string name="sc_water_long">+250 ml su ekle</string>
+    <string name="sc_heatmap_short">Ayak izi haritam</string>
+    <string name="sc_heatmap_long">Ayak izi haritamı aç</string>
+    <string name="sc_weekly_short">Haftalık özet</string>
+    <string name="sc_weekly_long">Haftalık özetimi göster</string>
 </resources>

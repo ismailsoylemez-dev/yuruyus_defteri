@@ -37,6 +37,10 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Uygulama ikonuna uzun basinca cikan kisayollar -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -61,6 +65,18 @@
             android:name=".StepService"
             android:foregroundServiceType="health|location"
             android:exported="false" />
+
+        <!-- Hizli Ayarlar kutucugu: Antrenman -->
+        <service
+            android:name=".WorkoutTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_workout"
+            android:label="Antrenman"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".BootReceiver"
